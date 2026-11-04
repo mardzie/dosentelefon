@@ -23,8 +23,15 @@ pub struct JitterBuf<T> {
 
 impl<T> JitterBuf<T> {
     const DEFAULT_CAPACTITY_MULTIPLIER: NonZeroUsize =
-        NonZeroUsize::new(4).expect("default capacity multiplier must be non zero");
+        NonZeroUsize::new(4).expect("default capacity multiplier should be non zero");
 
+    /// Constructs a new `JitterBuf`.
+    ///
+    /// `target_delay` is the delay that is kept between pushing a entry and popping it again.
+    ///
+    /// `frame_size` is `FrameSize` and is used to calculate how many packets have to be kept in the buffer.
+    /// `target_delay.div_ceil(frame_size.duration())` -> `100 ms / 20 ms = 5 packets`
+    /// (The result will be multiplied by the `DEFAULT_CAPACITY_MULTIPLIER` to acomodate bursts of packets or if packets got popped late.)
     #[must_use]
     pub fn new(
         target_delay: Duration,
@@ -33,6 +40,13 @@ impl<T> JitterBuf<T> {
         Self::with_multiplier(target_delay, frame_size, Self::DEFAULT_CAPACTITY_MULTIPLIER)
     }
 
+    /// Constructs a new `JitterBuf`.
+    ///
+    /// `target_delay` is the delay that is kept between pushing a entry and popping it again.
+    ///
+    /// `frame_size` is `FrameSize` and is used to calculate how many packets have to be kept in the buffer.
+    /// `target_delay.div_ceil(frame_size.duration())` -> `100 ms / 20 ms = 5 packets`
+    /// The result will be multiplied by the `capacity_multiplier` to acomodate bursts of packets or if packets got popped late.
     pub fn with_multiplier(
         target_delay: Duration,
         frame_size: FrameSize,
