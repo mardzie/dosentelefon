@@ -176,4 +176,55 @@ where
 }
 
 #[cfg(test)]
-mod jitter_buf_test {}
+mod jitter_buf_test {
+    use std::time::{Duration, Instant};
+
+    use audio_common::frame_size::FrameSize;
+
+    use crate::{Entry, JitterBuf, error::PopError};
+
+    #[test]
+    fn test_push() {
+        const N: usize = 4;
+        let now = Instant::now();
+        let mut entries = Vec::with_capacity(N);
+        for i in 0..N {
+            let timestamp = now
+                .checked_add(Duration::from_millis(20 * i as u64))
+                .unwrap();
+            entries.push(Entry::new(i as u64, timestamp, i + 1));
+        }
+
+        let target_delay = Duration::from_millis(100);
+        let mut jb = JitterBuf::new(target_delay, FrameSize::default()).unwrap();
+        for entry in entries.clone() {
+            jb.push(entry).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_delay() {
+        let target_delay = Duration::from_millis(100);
+        let mut jb: JitterBuf<i32> = JitterBuf::new(target_delay, FrameSize::default())
+            .expect("Should be a valid configuration");
+
+        let now = Instant::now();
+        let entry = Entry::new(0, now, 32);
+        jb.push(entry.clone()).unwrap();
+
+        let popped = loop {
+            match jb.pop() {
+                Ok(entry) => break entry,
+                Err(PopError::Underrun) => panic!("Can not underrun"),
+                Err(PopError::NotReady(dur)) => {
+                    assert!(
+                        dur >= target_delay,
+                        "duration to ready must be smaller than the target delay"
+                    )
+                }
+            };
+        };
+
+        assert_eq!(popped, entry);
+    }
+}
