@@ -22,8 +22,12 @@ pub type SequenceNumber = u64;
 #[derive(Debug)]
 pub struct JitterBuf<T> {
     inner: Vec<Option<Entry<T>>>,
-    pop_seq: SequenceNumber,
+    /// The biggest pushed sequence number.
+    ///
+    /// Not all slots between `pop_seq` and `push_seq` must be filled.
     push_seq: SequenceNumber,
+    /// The next sequence number to be popped.
+    pop_seq: SequenceNumber,
 
     target_delay: Duration,
 }
@@ -74,7 +78,7 @@ impl<T> JitterBuf<T> {
         })
     }
 
-    /// Push a new `Entry` to the `JitterBuf`.
+    /// Push a `Entry` to the `JitterBuf`.
     ///
     /// If a sequence number is pushed multiple times only the first gets accepted, other will get rejected with [`PushError::Duplicate`].
     ///
@@ -88,8 +92,8 @@ impl<T> JitterBuf<T> {
         if seq < self.pop_seq {
             return Err(PushError::LatePacket { seq });
         }
-        let idx = self.index_from_seq(seq);
-        let value = self.inner.get_mut(idx).expect("index must be in bounds");
+        let index = self.index_from_seq(seq);
+        let value = self.inner.get_mut(index).expect("index must be in bounds");
         if let Some(old_entry) = value {
             if old_entry.seq() == seq {
                 return Err(PushError::Duplicate { seq });
@@ -139,33 +143,27 @@ impl<T> JitterBuf<T> {
         Ok(entry)
     }
 
-    /// The last popped sequence number.
-    #[must_use]
-    #[inline]
-    pub fn pop_seq(&self) -> u64 {
-        self.pop_seq
-    }
-
-    /// The newest pushed sequence number.
+    /// The biggest pushed sequence number.
+    ///
+    /// Not all slots between `pop_seq` and `push_seq` must be filled.
     #[must_use]
     #[inline]
     pub fn push_seq(&self) -> u64 {
         self.push_seq
     }
 
-    /// Returns the current index for `inner`.
-    ///
-    /// The index is always valid.
-    fn current_pop_index(&self) -> usize {
-        self.index_from_seq(self.pop_seq + 1)
+    /// The next sequence number to be popped.
+    #[must_use]
+    #[inline]
+    pub fn pop_seq(&self) -> u64 {
+        self.pop_seq
     }
 
     /// Returns the index of the `sequence_number`.
     ///
     /// The index is always valid.
     fn index_from_seq(&self, seq: u64) -> usize {
-        let index =
-            (usize::try_from(seq).expect("can not convert u64 to usize") + 1) % self.inner.len();
+        let index = usize::try_from(seq).expect("can not convert u64 to usize") % self.inner.len();
         debug_assert!(self.inner.get(index).is_some());
 
         index
