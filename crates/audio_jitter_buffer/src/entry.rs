@@ -12,8 +12,10 @@ pub struct Entry<T> {
 }
 
 impl<T> Entry<T> {
-    /// `seq` is the sequence number that is used to detect missing packets.
+    /// `seq` is the sequence number that is used to detect missing packets. `seq > 0`
+    ///
     /// `timestamp` is the timestamp at receive time.
+    ///
     /// `inner` is the actual data.
     #[must_use]
     #[inline]
@@ -27,7 +29,7 @@ impl<T> Entry<T> {
 
     /// Read [`Entry::new()`] to learn more.
     ///
-    /// `timestamp` is the current time for this function.
+    /// `timestamp` is the current time at call.
     #[must_use]
     #[inline]
     pub fn from_now(seq: u64, inner: T) -> Self {
