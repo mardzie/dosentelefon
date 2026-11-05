@@ -164,8 +164,8 @@ impl<T> JitterBuf<T> {
     ///
     /// The index is always valid.
     fn index_from_seq(&self, seq: u64) -> usize {
-        let index = (usize::try_from(seq).expect("can not convert u64 to usize") + 1)
-            % self.inner.capacity();
+        let index =
+            (usize::try_from(seq).expect("can not convert u64 to usize") + 1) % self.inner.len();
         debug_assert!(self.inner.get(index).is_some());
 
         index
