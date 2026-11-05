@@ -112,10 +112,23 @@ impl<T> JitterBuf<T> {
 
     /// Pop the next `Entry` from the `JitterBuf`.
     ///
-    /// Advances the pointer by one each pop independant of the `Option` variant.
+    ///
     #[must_use]
     #[inline]
     pub fn pop(&mut self) -> Result<Entry<T>, error::PopError> {
+        let index = self.index_from_seq(self.pop_seq());
+        let value = self
+            .inner
+            .get_mut(index)
+            .expect("index should be in bounds");
+        let entry = value.take().expect("value should be `Some`");
+        debug_assert_eq!(entry.seq(), self.pop_seq());
+        self.pop_seq += 1;
+
+        Ok(entry)
+
+        // ----------------------------------------------------------
+
         let now = Instant::now();
         let current_index = self.current_pop_index();
         // The `current_index` must be in bounds. `current_index()` guarantees that.
