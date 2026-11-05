@@ -180,11 +180,14 @@ mod jitter_buf_test {
     use std::time::{Duration, Instant};
 
     use audio_common::frame_size::FrameSize;
+    use tracing::info;
 
     use crate::{Entry, JitterBuf, error::PopError};
 
     #[test]
     fn test_push() {
+        logging_setup();
+
         const N: usize = 4;
         let now = Instant::now();
         let mut entries = Vec::with_capacity(N);
@@ -198,12 +201,31 @@ mod jitter_buf_test {
         let target_delay = Duration::from_millis(100);
         let mut jb = JitterBuf::new(target_delay, FrameSize::default()).unwrap();
         for entry in entries.clone() {
+            info!(
+                "Pushing entry with seq: {}, timestamp {:?}, inner: {}",
+                entry.seq(),
+                entry.timestamp(),
+                entry.get()
+            );
             jb.push(entry).unwrap();
+        }
+
+        for (i, opt_entry) in jb.inner[..N].iter().enumerate() {
+            let entry = opt_entry
+                .as_ref()
+                .expect("entry should have been written to this index");
+            assert_eq!(
+                entry, &entries[i],
+                "Entry {:?} at {} should be {:?}",
+                entry, i, entries[i]
+            )
         }
     }
 
     #[test]
     fn test_delay() {
+        logging_setup();
+
         let target_delay = Duration::from_millis(100);
         let mut jb: JitterBuf<i32> = JitterBuf::new(target_delay, FrameSize::default())
             .expect("Should be a valid configuration");
@@ -226,5 +248,9 @@ mod jitter_buf_test {
         };
 
         assert_eq!(popped, entry);
+    }
+
+    fn logging_setup() {
+        tracing_subscriber::fmt::init();
     }
 }
