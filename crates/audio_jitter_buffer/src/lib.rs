@@ -89,7 +89,7 @@ impl<T> JitterBuf<T> {
     #[inline]
     pub fn push(&mut self, entry: Entry<T>) -> Result<(), PushError> {
         let seq = entry.seq();
-        if seq < self.pop_seq {
+        if seq <= self.pop_seq {
             return Err(PushError::LatePacket { seq });
         }
         let index = self.index_from_seq(seq);
@@ -105,6 +105,7 @@ impl<T> JitterBuf<T> {
             }
         }
         *value = Some(entry);
+        self.push_seq = self.push_seq.max(seq);
 
         Ok(())
     }
