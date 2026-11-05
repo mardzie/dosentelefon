@@ -8,8 +8,8 @@ pub enum ConstructionError {
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum PushError {
-    #[error("packet {seq} arrived too late (next expected {next_expected})")]
-    LatePacket { seq: u64, next_expected: u64 },
+    #[error("packet {seq} arrived too late")]
+    LatePacket { seq: u64 },
     #[error("duplicate packet {seq}")]
     Duplicate { seq: u64 },
     #[error("packet {seq} too far ahead (window ends at {window_end})")]

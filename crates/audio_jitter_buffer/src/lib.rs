@@ -6,17 +6,24 @@ use std::{
 use audio_common::frame_size::FrameSize;
 pub use entry::Entry;
 
+use crate::error::PushError;
+
 mod entry;
 
 pub mod error;
 
 pub type SequenceNumber = u64;
 
+/// The `JitterBuf` handles the timing of pushed entries.
+/// `target_delay` is the delay that each entry must at least stay inside the buffer.
+/// This is done to wait for incoming packets so that a stream does not play newer samples than the current if they are still on the wire.
+///
+/// The `JitterBuf` is implemented as a ring buffer over `Option<Entry<T>>`.
 #[derive(Debug)]
 pub struct JitterBuf<T> {
     inner: Vec<Option<Entry<T>>>,
-    last_popped_seq: SequenceNumber,
-    newest_pushed_seq: SequenceNumber,
+    pop_seq: SequenceNumber,
+    push_seq: SequenceNumber,
 
     target_delay: Duration,
 }
@@ -60,41 +67,40 @@ impl<T> JitterBuf<T> {
 
         Ok(Self {
             inner: std::iter::repeat_with(|| None).take(n).collect(),
-            last_popped_seq: 0,
-            newest_pushed_seq: 0,
+            pop_seq: 0,
+            push_seq: 0,
 
             target_delay,
         })
     }
 
     /// Push a new `Entry` to the `JitterBuf`.
+    ///
+    /// If a sequence number is pushed multiple times only the first gets accepted, other will get rejected with [`PushError::Duplicate`].
+    ///
+    /// If the push side of the ring buffer touches the pop side then [`PushError::TooFarAhead`] gets returned.
+    /// This can be fixed if a entry gets popped, then there is space for a new push.
+    ///
+    /// A entry with a sequence number smaller than the last popped one errors with [`PushError::LatePacket`].
     #[inline]
-    pub fn push(&mut self, entry: Entry<T>) -> Result<(), error::PushError> {
+    pub fn push(&mut self, entry: Entry<T>) -> Result<(), PushError> {
         let seq = entry.seq();
-        if seq <= self.last_popped_seq() {
-            return Err(error::PushError::LatePacket {
-                seq,
-                next_expected: self.newest_pushed_seq + 1,
-            });
+        if seq < self.pop_seq {
+            return Err(PushError::LatePacket { seq });
         }
-
-        let index = self.index_from_seq(seq);
-        if index >= self.current_pop_index() {
-            return Err(error::PushError::TooFarAhead {
-                seq,
-                window_end: self.last_popped_seq,
-            });
+        let idx = self.index_from_seq(seq);
+        let value = self.inner.get_mut(idx).expect("index must be in bounds");
+        if let Some(old_entry) = value {
+            if old_entry.seq() == seq {
+                return Err(PushError::Duplicate { seq });
+            } else {
+                return Err(PushError::TooFarAhead {
+                    seq,
+                    window_end: self.pop_seq(),
+                });
+            }
         }
-
-        let value = self.inner.get_mut(index).expect("index must be in bounds");
-        if let Some(old_entry) = value
-            && old_entry.seq() == seq
-        {
-            return Err(error::PushError::Duplicate { seq });
-        }
-
         *value = Some(entry);
-        self.newest_pushed_seq = self.newest_pushed_seq().max(seq);
 
         Ok(())
     }
@@ -113,7 +119,7 @@ impl<T> JitterBuf<T> {
             .get_mut(current_index)
             .expect("index must be in bounds");
         if value.is_none() {
-            self.last_popped_seq += 1;
+            self.pop_seq += 1;
             return Err(error::PopError::Underrun);
         }
         if let Some(entry) = value
@@ -126,9 +132,9 @@ impl<T> JitterBuf<T> {
         let entry = value
             .take()
             .expect("value should be `Some` after the ealier check");
-        self.last_popped_seq += 1;
+        self.pop_seq += 1;
 
-        debug_assert_eq!(entry.seq(), self.last_popped_seq());
+        debug_assert_eq!(entry.seq(), self.pop_seq());
 
         Ok(entry)
     }
@@ -136,22 +142,22 @@ impl<T> JitterBuf<T> {
     /// The last popped sequence number.
     #[must_use]
     #[inline]
-    pub fn last_popped_seq(&self) -> u64 {
-        self.last_popped_seq
+    pub fn pop_seq(&self) -> u64 {
+        self.pop_seq
     }
 
     /// The newest pushed sequence number.
     #[must_use]
     #[inline]
-    pub fn newest_pushed_seq(&self) -> u64 {
-        self.newest_pushed_seq
+    pub fn push_seq(&self) -> u64 {
+        self.push_seq
     }
 
     /// Returns the current index for `inner`.
     ///
     /// The index is always valid.
     fn current_pop_index(&self) -> usize {
-        self.index_from_seq(self.last_popped_seq + 1)
+        self.index_from_seq(self.pop_seq + 1)
     }
 
     /// Returns the index of the `sequence_number`.
