@@ -1,3 +1,5 @@
+#![warn(clippy::pedantic)]
+
 use std::{
     num::NonZeroUsize,
     time::{Duration, Instant},
@@ -104,6 +106,10 @@ impl<T> JitterBuf<T> {
     pub fn push(&mut self, entry: Entry<T>) -> Result<(), PushError> {
         let seq = entry.seq();
 
+        if self.deadline.is_none() {
+            self.pop_seq = seq;
+        }
+
         if seq < self.pop_seq {
             return Err(PushError::LatePacket { seq });
         }
@@ -125,12 +131,7 @@ impl<T> JitterBuf<T> {
         self.push_seq = self.push_seq.max(Some(seq));
         self.len += 1;
         if self.deadline.is_none() {
-            self.deadline = Some(
-                Instant::now()
-                    .checked_add(self.target_delay.checked_add(self.frame_size.duration())
-                        .expect("`target_delay` and `frame_size.duration()` should not be overflowing addition"))
-                    .expect("`target_delay + frame_size` should not overflow `Instant::now()`"),
-            );
+            self.deadline = Some(self.calculate_deadline());
         }
 
         Ok(())
@@ -221,6 +222,18 @@ impl<T> JitterBuf<T> {
         self.inner.capacity()
     }
 
+    /// Resets the `JitterBuf`.
+    ///
+    /// It now begins again at sequence number `0`.
+    #[inline]
+    pub fn reset(&mut self) {
+        self.len = 0;
+        self.pop_seq = 0;
+        self.push_seq = None;
+        self.deadline = None;
+        self.inner.iter_mut().for_each(|v| *v = None);
+    }
+
     /// Returns the index of the `sequence_number`.
     ///
     /// The index is always valid.
@@ -229,6 +242,13 @@ impl<T> JitterBuf<T> {
         debug_assert!(self.inner.get(index).is_some());
 
         index
+    }
+
+    fn calculate_deadline(&self) -> Instant {
+        Instant::now()
+            .checked_add(self.target_delay.checked_add(self.frame_size.duration())
+                .expect("`target_delay` and `frame_size.duration()` should not be overflowing addition"))
+            .expect("`target_delay + frame_size` should not overflow `Instant::now()`")
     }
 }
 
