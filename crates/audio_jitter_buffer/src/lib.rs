@@ -162,7 +162,7 @@ impl<T> JitterBuf<T> {
         self.pop_seq += 1;
         match value.take() {
             Some(entry) => {
-                debug_assert_eq!(entry.seq(), self.pop_seq());
+                debug_assert_eq!(entry.seq(), self.pop_seq() - 1);
                 self.len -= 1;
                 Ok(entry)
             }
@@ -289,7 +289,7 @@ mod jitter_buf_test {
                 Err(PopError::Underrun) => panic!("Can not underrun"),
                 Err(PopError::NotReady(dur)) => {
                     assert!(
-                        dur >= target_delay,
+                        dur <= target_delay + jb.frame_size.duration(),
                         "duration to ready must be smaller than the target delay"
                     )
                 }
