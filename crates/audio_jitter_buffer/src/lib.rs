@@ -231,7 +231,6 @@ impl<T> JitterBuf<T> {
     #[inline]
     pub fn reset(&mut self) {
         self.len = 0;
-        self.pop_seq = 0;
         self.push_seq = None;
         self.deadline = None;
         self.inner.iter_mut().for_each(|v| *v = None);
