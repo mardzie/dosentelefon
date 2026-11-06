@@ -25,7 +25,7 @@ pub struct JitterBuf<T> {
     /// The biggest pushed sequence number.
     ///
     /// Not all slots between `pop_seq` and `push_seq` must be filled.
-    push_seq: SequenceNumber,
+    push_seq: Option<SequenceNumber>,
     /// The next sequence number to be popped.
     pop_seq: SequenceNumber,
     /// The time when a new entry can get popped.
@@ -48,8 +48,10 @@ impl<T> JitterBuf<T> {
     /// `frame_size` is `FrameSize` and is used to calculate how many packets have to be kept in the buffer.
     /// `target_delay.div_ceil(frame_size.duration())` -> `100 ms / 20 ms = 5 packets`
     /// (The result will be multiplied by the `DEFAULT_CAPACITY_MULTIPLIER` to acomodate bursts of packets or if packets got popped late.)
+    ///
+    /// Returns `None` when the division of `target_delay` and `frame_size.duration()` nanos does not fit into a `usize`.
     #[must_use]
-    pub fn new(target_delay: Duration, frame_size: FrameSize) -> Self {
+    pub fn new(target_delay: Duration, frame_size: FrameSize) -> Option<Self> {
         Self::with_multiplier(target_delay, frame_size, Self::DEFAULT_CAPACTITY_MULTIPLIER)
     }
 
@@ -60,27 +62,32 @@ impl<T> JitterBuf<T> {
     /// `frame_size` is `FrameSize` and is used to calculate how many packets have to be kept in the buffer.
     /// `target_delay.div_ceil(frame_size.duration())` -> `100 ms / 20 ms = 5 packets`
     /// The result will be multiplied by the `capacity_multiplier` to acomodate bursts of packets or if packets got popped late.
+    ///
+    /// Returns `None` when the division of `target_delay` and `frame_size.duration()` nanos does not fit into a `usize`.
     pub fn with_multiplier(
         target_delay: Duration,
         frame_size: FrameSize,
         // To multiply the necessary capacity for bursts of incoming packets.
         capacity_multiplier: NonZeroUsize,
-    ) -> Self {
+    ) -> Option<Self> {
         let capacity = target_delay
             .as_nanos()
-            .div_ceil(frame_size.duration().as_nanos());
-        let n = capacity as usize * capacity_multiplier.get();
+            .div_ceil(frame_size.duration().as_nanos())
+            + 2;
+        let n = usize::try_from(capacity)
+            .ok()
+            .and_then(|c| c.checked_mul(capacity_multiplier.get()))?;
 
-        Self {
+        Some(Self {
             inner: std::iter::repeat_with(|| None).take(n).collect(),
             pop_seq: 0,
-            push_seq: 0,
+            push_seq: None,
             deadline: None,
             len: 0,
 
             target_delay,
             frame_size,
-        }
+        })
     }
 
     /// Push a `Entry` to the `JitterBuf`.
@@ -100,22 +107,22 @@ impl<T> JitterBuf<T> {
         if seq < self.pop_seq {
             return Err(PushError::LatePacket { seq });
         }
+        let cap = self.inner.len() as u64;
+        if seq - self.pop_seq >= cap {
+            return Err(PushError::TooFarAhead {
+                seq,
+                window_end: self.pop_seq + cap - 1,
+            });
+        }
 
         let index = self.index_from_seq(seq);
         let value = self.inner.get_mut(index).expect("index must be in bounds");
-        if let Some(old_entry) = value {
-            if old_entry.seq() == seq {
-                return Err(PushError::Duplicate { seq });
-            } else {
-                return Err(PushError::TooFarAhead {
-                    seq,
-                    window_end: self.pop_seq(),
-                });
-            }
+        if value.is_some() {
+            return Err(PushError::Duplicate { seq });
         }
 
         *value = Some(entry);
-        self.push_seq = self.push_seq.max(seq);
+        self.push_seq = self.push_seq.max(Some(seq));
         self.len += 1;
         if self.deadline.is_none() {
             self.deadline = Some(
@@ -172,10 +179,12 @@ impl<T> JitterBuf<T> {
 
     /// The biggest pushed sequence number.
     ///
+    /// Returns `None` if no `Entry` got pushed yet.
+    ///
     /// Not all slots between `pop_seq` and `push_seq` must be filled.
     #[must_use]
     #[inline]
-    pub fn push_seq(&self) -> u64 {
+    pub fn push_seq(&self) -> Option<u64> {
         self.push_seq
     }
 
@@ -187,11 +196,15 @@ impl<T> JitterBuf<T> {
     }
 
     /// The current sequence number window length.
+    ///
+    /// Returns `None` when no `Entry` got pushed yet.
     #[must_use]
     #[inline]
-    pub fn window_len(&self) -> usize {
-        usize::try_from(self.push_seq() - self.pop_seq())
-            .expect("`push_seq + pop_seq` should be convertible to `usize`")
+    pub fn window_len(&self) -> Option<usize> {
+        Some(
+            usize::try_from((self.push_seq? + 1).saturating_sub(self.pop_seq))
+                .expect("`push_seq - pop_seq` should be convertible to `usize`"),
+        )
     }
 
     /// The currently stored `Entry` count.
@@ -201,11 +214,18 @@ impl<T> JitterBuf<T> {
         self.len
     }
 
+    /// The capacity of the `JitterBuf`.
+    #[must_use]
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity()
+    }
+
     /// Returns the index of the `sequence_number`.
     ///
     /// The index is always valid.
     fn index_from_seq(&self, seq: u64) -> usize {
-        let index = usize::try_from(seq).expect("can not convert u64 to usize") % self.inner.len();
+        let index = (seq % self.inner.len() as u64) as usize;
         debug_assert!(self.inner.get(index).is_some());
 
         index
@@ -218,6 +238,7 @@ where
 {
     fn default() -> Self {
         Self::new(Duration::from_millis(100), FrameSize::default())
+            .expect("default values should be valid")
     }
 }
 
@@ -245,7 +266,7 @@ mod jitter_buf_test {
         }
 
         let target_delay = Duration::from_millis(100);
-        let mut jb = JitterBuf::new(target_delay, FrameSize::default());
+        let mut jb = JitterBuf::new(target_delay, FrameSize::default()).unwrap();
         for entry in entries.clone() {
             info!(
                 "Pushing entry with seq: {}, timestamp {:?}, inner: {}",
@@ -267,7 +288,8 @@ mod jitter_buf_test {
             )
         }
         assert_eq!(
-            jb.push_seq(),
+            jb.push_seq()
+                .expect("should be available because it was pushed to the `JitterBuf`"),
             u64::try_from(N - 1).expect("should be convertible to `u64`")
         );
     }
@@ -277,7 +299,7 @@ mod jitter_buf_test {
         logging_setup();
 
         let target_delay = Duration::from_millis(100);
-        let mut jb: JitterBuf<i32> = JitterBuf::new(target_delay, FrameSize::default());
+        let mut jb: JitterBuf<i32> = JitterBuf::new(target_delay, FrameSize::default()).unwrap();
 
         let now = Instant::now();
         let entry = Entry::new(0, now, 32);
