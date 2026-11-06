@@ -1,12 +1,6 @@
 use std::time::Duration;
 
 #[derive(thiserror::Error, Debug, Clone)]
-pub enum ConstructionError {
-    #[error("frame size {} s too small", .0.as_secs_f32())]
-    FrameSizeTooSmall(Duration),
-}
-
-#[derive(thiserror::Error, Debug, Clone)]
 pub enum PushError {
     #[error("packet {seq} arrived too late")]
     LatePacket { seq: u64 },

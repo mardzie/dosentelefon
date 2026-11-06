@@ -47,7 +47,7 @@ impl<T> JitterBuf<T> {
     pub fn new(
         target_delay: Duration,
         frame_size: FrameSize,
-    ) -> Result<Self, error::ConstructionError> {
+    ) -> Self {
         Self::with_multiplier(target_delay, frame_size, Self::DEFAULT_CAPACTITY_MULTIPLIER)
     }
 
@@ -63,19 +63,19 @@ impl<T> JitterBuf<T> {
         frame_size: FrameSize,
         // To multiply the necessary capacity for bursts of incoming packets.
         capacity_multiplier: NonZeroUsize,
-    ) -> Result<Self, error::ConstructionError> {
+    ) -> Self {
         let capacity = target_delay
             .as_nanos()
             .div_ceil(frame_size.duration().as_nanos());
         let n = capacity as usize * capacity_multiplier.get();
 
-        Ok(Self {
+        Self {
             inner: std::iter::repeat_with(|| None).take(n).collect(),
             pop_seq: 0,
             push_seq: 0,
 
             target_delay,
-        })
+        }
     }
 
     /// Push a `Entry` to the `JitterBuf`.
@@ -189,7 +189,7 @@ where
     T: Clone,
 {
     fn default() -> Self {
-        Self::new(Duration::from_millis(100), FrameSize::default()).expect("default must be valid")
+        Self::new(Duration::from_millis(100), FrameSize::default())
     }
 }
 
@@ -217,7 +217,7 @@ mod jitter_buf_test {
         }
 
         let target_delay = Duration::from_millis(100);
-        let mut jb = JitterBuf::new(target_delay, FrameSize::default()).unwrap();
+        let mut jb = JitterBuf::new(target_delay, FrameSize::default());
         for entry in entries.clone() {
             info!(
                 "Pushing entry with seq: {}, timestamp {:?}, inner: {}",
@@ -245,8 +245,7 @@ mod jitter_buf_test {
         logging_setup();
 
         let target_delay = Duration::from_millis(100);
-        let mut jb: JitterBuf<i32> = JitterBuf::new(target_delay, FrameSize::default())
-            .expect("Should be a valid configuration");
+        let mut jb: JitterBuf<i32> = JitterBuf::new(target_delay, FrameSize::default());
 
         let now = Instant::now();
         let entry = Entry::new(0, now, 32);
