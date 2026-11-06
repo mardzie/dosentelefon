@@ -12,7 +12,7 @@ pub struct Entry<T> {
 }
 
 impl<T> Entry<T> {
-    /// `seq` is the sequence number that is used to detect missing packets. `seq > 0`
+    /// `seq` is the sequence number that is used to detect missing packets.
     ///
     /// `timestamp` is the timestamp at receive time.
     ///
