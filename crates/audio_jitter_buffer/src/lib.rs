@@ -347,6 +347,6 @@ mod jitter_buf_test {
     }
 
     fn logging_setup() {
-        tracing_subscriber::fmt::init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     }
 }
