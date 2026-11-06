@@ -6,7 +6,7 @@ use std::{
 use audio_common::frame_size::FrameSize;
 pub use entry::Entry;
 
-use crate::error::PushError;
+use crate::error::{PopError, PushError};
 
 mod entry;
 
@@ -28,8 +28,13 @@ pub struct JitterBuf<T> {
     push_seq: SequenceNumber,
     /// The next sequence number to be popped.
     pop_seq: SequenceNumber,
+    /// The time when a new entry can get popped.
+    deadline: Option<Instant>,
+    /// The currently stored `Entry` count.
+    len: usize,
 
     target_delay: Duration,
+    frame_size: FrameSize,
 }
 
 impl<T> JitterBuf<T> {
@@ -44,10 +49,7 @@ impl<T> JitterBuf<T> {
     /// `target_delay.div_ceil(frame_size.duration())` -> `100 ms / 20 ms = 5 packets`
     /// (The result will be multiplied by the `DEFAULT_CAPACITY_MULTIPLIER` to acomodate bursts of packets or if packets got popped late.)
     #[must_use]
-    pub fn new(
-        target_delay: Duration,
-        frame_size: FrameSize,
-    ) -> Self {
+    pub fn new(target_delay: Duration, frame_size: FrameSize) -> Self {
         Self::with_multiplier(target_delay, frame_size, Self::DEFAULT_CAPACTITY_MULTIPLIER)
     }
 
@@ -73,8 +75,11 @@ impl<T> JitterBuf<T> {
             inner: std::iter::repeat_with(|| None).take(n).collect(),
             pop_seq: 0,
             push_seq: 0,
+            deadline: None,
+            len: 0,
 
             target_delay,
+            frame_size,
         }
     }
 
@@ -86,6 +91,8 @@ impl<T> JitterBuf<T> {
     /// This can be fixed if a entry gets popped, then there is space for a new push.
     ///
     /// A entry with a sequence number smaller than the last popped one errors with [`PushError::LatePacket`].
+    ///
+    /// Initializes the `JitterBuf` on first call.
     #[inline]
     pub fn push(&mut self, entry: Entry<T>) -> Result<(), PushError> {
         let seq = entry.seq();
@@ -109,55 +116,58 @@ impl<T> JitterBuf<T> {
 
         *value = Some(entry);
         self.push_seq = self.push_seq.max(seq);
+        self.len += 1;
+        if self.deadline.is_none() {
+            self.deadline = Some(
+                Instant::now()
+                    .checked_add(self.target_delay.checked_add(self.frame_size.duration())
+                        .expect("`target_delay` and `frame_size.duration()` should not be overflowing addition"))
+                    .expect("`target_delay + frame_size` should not overflow `Instant::now()`"),
+            );
+        }
 
         Ok(())
     }
 
     /// Pop the next `Entry` from the `JitterBuf`.
     ///
+    /// `PopError::NotReady` is returned if the `target_delay` didn't yet pass.
     ///
-    #[must_use]
+    /// `PopError::Underrun` is returned if a mature slot has no entry present.
+    /// Depending on the codec this should be signalled to the codec.
+    ///
+    /// `PopError::Uninitialized` is returned if the `JitterBuf` has not been initialized by a `JitterBuf::push`.
+    /// A call to [`JitterBuf::push`] will initialize the `JitterBuf`.
     #[inline]
-    pub fn pop(&mut self) -> Result<Entry<T>, error::PopError> {
+    pub fn pop(&mut self) -> Result<Entry<T>, PopError> {
+        let deadline = match self.deadline {
+            Some(deadline) => deadline,
+            None => return Err(PopError::Uninitialized),
+        };
+        let now = Instant::now();
+        let time_to_maturity = deadline.checked_duration_since(now);
+        if let Some(duration) = time_to_maturity {
+            return Err(PopError::NotReady(duration));
+        }
+        self.deadline = deadline
+            .checked_add(self.frame_size.duration())
+            .expect("no system should ever be running for this long")
+            .into();
+
         let index = self.index_from_seq(self.pop_seq());
         let value = self
             .inner
             .get_mut(index)
             .expect("index should be in bounds");
-        let entry = value.take().expect("value should be `Some`");
-        debug_assert_eq!(entry.seq(), self.pop_seq());
         self.pop_seq += 1;
-
-        Ok(entry)
-
-        // ----------------------------------------------------------
-
-        let now = Instant::now();
-        let current_index = self.current_pop_index();
-        // The `current_index` must be in bounds. `current_index()` guarantees that.
-        let value = self
-            .inner
-            .get_mut(current_index)
-            .expect("index must be in bounds");
-        if value.is_none() {
-            self.pop_seq += 1;
-            return Err(error::PopError::Underrun);
+        match value.take() {
+            Some(entry) => {
+                debug_assert_eq!(entry.seq(), self.pop_seq());
+                self.len -= 1;
+                Ok(entry)
+            }
+            None => Err(PopError::Underrun),
         }
-        if let Some(entry) = value
-            && now < entry.timestamp() + self.target_delay
-        {
-            let remaining = entry.timestamp() + self.target_delay - now;
-            return Err(error::PopError::NotReady(remaining));
-        }
-
-        let entry = value
-            .take()
-            .expect("value should be `Some` after the ealier check");
-        self.pop_seq += 1;
-
-        debug_assert_eq!(entry.seq(), self.pop_seq());
-
-        Ok(entry)
     }
 
     /// The biggest pushed sequence number.
@@ -174,6 +184,21 @@ impl<T> JitterBuf<T> {
     #[inline]
     pub fn pop_seq(&self) -> u64 {
         self.pop_seq
+    }
+
+    /// The current sequence number window length.
+    #[must_use]
+    #[inline]
+    pub fn window_len(&self) -> usize {
+        usize::try_from(self.push_seq() - self.pop_seq())
+            .expect("`push_seq + pop_seq` should be convertible to `usize`")
+    }
+
+    /// The currently stored `Entry` count.
+    #[must_use]
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.len
     }
 
     /// Returns the index of the `sequence_number`.
@@ -241,6 +266,10 @@ mod jitter_buf_test {
                 entry, i, entries[i]
             )
         }
+        assert_eq!(
+            jb.push_seq(),
+            u64::try_from(N - 1).expect("should be convertible to `u64`")
+        );
     }
 
     #[test]
@@ -254,9 +283,9 @@ mod jitter_buf_test {
         let entry = Entry::new(0, now, 32);
         jb.push(entry.clone()).unwrap();
 
-        let popped = loop {
+        let (popped, timestamp) = loop {
             match jb.pop() {
-                Ok(entry) => break entry,
+                Ok(entry) => break (entry, Instant::now()),
                 Err(PopError::Underrun) => panic!("Can not underrun"),
                 Err(PopError::NotReady(dur)) => {
                     assert!(
@@ -264,10 +293,12 @@ mod jitter_buf_test {
                         "duration to ready must be smaller than the target delay"
                     )
                 }
+                Err(PopError::Uninitialized) => panic!("Should be initialized"),
             };
         };
 
         assert_eq!(popped, entry);
+        assert!(timestamp.duration_since(now) > jb.target_delay + jb.frame_size.duration());
     }
 
     fn logging_setup() {

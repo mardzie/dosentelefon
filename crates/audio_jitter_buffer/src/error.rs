@@ -14,6 +14,11 @@ pub enum PushError {
 pub enum PopError {
     #[error("not ready for {} ms", .0.as_millis())]
     NotReady(Duration),
+    /// This means the current entry did not get pushed in time.
+    ///
+    /// This should be signalled to the codec as a missing frame.
     #[error("empty frame")]
     Underrun,
+    #[error("uninitialized")]
+    Uninitialized,
 }
