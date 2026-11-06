@@ -103,7 +103,7 @@ impl<T> JitterBuf<T> {
     ///
     /// Initializes the `JitterBuf` on first call.
     #[inline]
-    pub fn push(&mut self, entry: Entry<T>) -> Result<(), PushError> {
+    pub fn push(&mut self, entry: Entry<T>) -> Result<(), (PushError, Entry<T>)> {
         let seq = entry.seq();
 
         if self.deadline.is_none() {
@@ -111,20 +111,23 @@ impl<T> JitterBuf<T> {
         }
 
         if seq < self.pop_seq {
-            return Err(PushError::LatePacket { seq });
+            return Err((PushError::LatePacket { seq }, entry));
         }
         let cap = self.inner.len() as u64;
         if seq - self.pop_seq >= cap {
-            return Err(PushError::TooFarAhead {
-                seq,
-                window_end: self.pop_seq + cap - 1,
-            });
+            return Err((
+                PushError::TooFarAhead {
+                    seq,
+                    window_end: self.pop_seq + cap - 1,
+                },
+                entry,
+            ));
         }
 
         let index = self.index_from_seq(seq);
         let value = self.inner.get_mut(index).expect("index must be in bounds");
         if value.is_some() {
-            return Err(PushError::Duplicate { seq });
+            return Err((PushError::Duplicate { seq }, entry));
         }
 
         *value = Some(entry);
