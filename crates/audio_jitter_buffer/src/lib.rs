@@ -222,7 +222,7 @@ impl<T> JitterBuf<T> {
     #[must_use]
     #[inline]
     pub fn capacity(&self) -> usize {
-        self.inner.capacity()
+        self.inner.len()
     }
 
     /// Resets the `JitterBuf`.
