@@ -226,8 +226,6 @@ impl<T> JitterBuf<T> {
     }
 
     /// Resets the `JitterBuf`.
-    ///
-    /// It now begins again at sequence number `0`.
     #[inline]
     pub fn reset(&mut self) {
         self.len = 0;
