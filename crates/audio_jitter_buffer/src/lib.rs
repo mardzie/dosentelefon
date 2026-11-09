@@ -259,6 +259,40 @@ impl<T> JitterBuf<T> {
         self.inner.iter_mut().filter_map(Option::take).collect()
     }
 
+    /// Checks if the sequence number is in bounds.
+    ///
+    /// In bounds means that the sequence number is greater than the last popped sequence number
+    /// and smaller than a full wrap around of the ring.
+    /// A full wrap around would land on the to be popped slot, so it has to be smaller.
+    #[must_use]
+    #[inline]
+    pub fn seq_in_bounds(&self, seq: SequenceNumber) -> bool {
+        self.pop_seq >= seq
+            && seq
+                < self.pop_seq
+                    + u64::try_from(self.inner.len())
+                        .expect("should be able to convert the ring buf len to u64")
+    }
+
+    // When view types are finally stabilized...
+    //
+    //     /// Get a value from a sequence number.
+    //     #[must_use]
+    //     fn value_from_seq(&self, seq: SequenceNumber) -> Option<&Entry<T>> {
+    //         let index = self.index_from_seq(seq);
+    //         self.inner
+    //             .get(index)
+    //             .expect("index must be in bounds")
+    //             .as_ref()
+    //     }
+    //
+    //     /// Get a mutable value from a sequence number.
+    //     #[must_use]
+    //     fn value_from_seq_mut(&mut self, seq: SequenceNumber) -> &mut Option<Entry<T>> {
+    //         let index = self.index_from_seq(seq);
+    //         self.inner.get_mut(index).expect("index must be in bounds")
+    //     }
+
     /// Returns the index of the `sequence_number`.
     ///
     /// The index is always valid.
