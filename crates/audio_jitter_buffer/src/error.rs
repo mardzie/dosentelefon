@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::Entry;
+
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum PushError {
     #[error("packet {seq} arrived too late")]
@@ -11,7 +13,7 @@ pub enum PushError {
 }
 
 #[derive(thiserror::Error, Debug, Clone)]
-pub enum PopError {
+pub enum PopError<T> {
     #[error("not ready for {} ms", .0.as_millis())]
     NotReady(Duration),
     /// This means the current entry did not get pushed in time.
@@ -21,4 +23,9 @@ pub enum PopError {
     Underrun,
     #[error("uninitialized")]
     Uninitialized,
+    /// The sequence number has overflown.
+    ///
+    /// All remaining `Entry`'s in the buffer are in the `Vec`.
+    #[error("sequence number overflow")]
+    SeqOverflow(Vec<Entry<T>>),
 }

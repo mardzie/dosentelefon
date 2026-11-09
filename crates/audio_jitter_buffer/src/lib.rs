@@ -142,15 +142,24 @@ impl<T> JitterBuf<T> {
 
     /// Pop the next `Entry` from the `JitterBuf`.
     ///
-    /// `PopError::NotReady` is returned if the `target_delay` didn't yet pass.
+    /// # Errors
     ///
-    /// `PopError::Underrun` is returned if a mature slot has no entry present.
+    /// [`PopError::NotReady`] is returned if the `target_delay` didn't yet pass.
+    ///
+    /// [`PopError::Underrun`] is returned if a mature slot has no entry present.
     /// Depending on the codec this should be signalled to the codec.
     ///
-    /// `PopError::Uninitialized` is returned if the `JitterBuf` has not been initialized by a `JitterBuf::push`.
+    /// [`PopError::Uninitialized`] is returned if the `JitterBuf` has not been initialized by a `JitterBuf::push`.
     /// A call to [`JitterBuf::push`] will initialize the `JitterBuf`.
+    ///
+    /// [`PopError::SeqOverflow`] is returned if the sequence number overflows `u64::MAX`.
+    /// If `SeqOverflow` is returned the `JitterBuf` automatically reset itself and can accept any sequence number again.
+    /// This error should generally never be returned because it would take 1.46 billion years at 2.5 ms.
+    /// (`2^64 * 0.0025 / 60 / 60 / 24 / 365.25 = 1,461,355,115.226566 years`))
+    ///
+    /// See [`JitterBuf::reset()`] for more info
     #[inline]
-    pub fn pop(&mut self) -> Result<Entry<T>, PopError> {
+    pub fn pop(&mut self) -> Result<Entry<T>, PopError<T>> {
         let deadline = match self.deadline {
             Some(deadline) => deadline,
             None => return Err(PopError::Uninitialized),
@@ -170,7 +179,13 @@ impl<T> JitterBuf<T> {
             .inner
             .get_mut(index)
             .expect("index should be in bounds");
-        self.pop_seq += 1;
+        self.pop_seq = match self.pop_seq.checked_add(1) {
+            Some(res) => res,
+            None => {
+                let entries = self.reset();
+                return Err(PopError::SeqOverflow(entries));
+            }
+        };
         match value.take() {
             Some(entry) => {
                 debug_assert_eq!(entry.seq(), self.pop_seq() - 1);
@@ -206,7 +221,7 @@ impl<T> JitterBuf<T> {
     #[inline]
     pub fn window_len(&self) -> Option<usize> {
         Some(
-            usize::try_from((self.push_seq? + 1).saturating_sub(self.pop_seq))
+            usize::try_from((self.push_seq?.checked_add(1)?).saturating_sub(self.pop_seq))
                 .expect("`push_seq - pop_seq` should be convertible to `usize`"),
         )
     }
@@ -226,12 +241,15 @@ impl<T> JitterBuf<T> {
     }
 
     /// Resets the `JitterBuf`.
+    ///
+    /// After resetting it accepts any sequence number again.
+    /// Returns all `Entry`'s in the buffer.
     #[inline]
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self) -> Vec<Entry<T>> {
         self.len = 0;
         self.push_seq = None;
         self.deadline = None;
-        self.inner.iter_mut().for_each(|v| *v = None);
+        self.inner.iter_mut().filter_map(|v| v.take()).collect()
     }
 
     /// Returns the index of the `sequence_number`.
@@ -336,6 +354,7 @@ mod jitter_buf_test {
                     )
                 }
                 Err(PopError::Uninitialized) => panic!("Should be initialized"),
+                Err(PopError::SeqOverflow(_)) => panic!("Sequence number should not overflow"),
             };
         };
 
