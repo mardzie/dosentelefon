@@ -66,6 +66,7 @@ impl<T> JitterBuf<T> {
     /// The result will be multiplied by the `capacity_multiplier` to acomodate bursts of packets or if packets got popped late.
     ///
     /// Returns `None` when the division of `target_delay` and `frame_size.duration()` nanos does not fit into a `usize`.
+    #[must_use]
     pub fn with_multiplier(
         target_delay: Duration,
         frame_size: FrameSize,
@@ -93,6 +94,8 @@ impl<T> JitterBuf<T> {
     }
 
     /// Push a `Entry` to the `JitterBuf`.
+    ///
+    /// # Errors
     ///
     /// If a sequence number is pushed multiple times only the first gets accepted, other will get rejected with [`PushError::Duplicate`].
     ///
@@ -160,9 +163,8 @@ impl<T> JitterBuf<T> {
     /// See [`JitterBuf::reset()`] for more info
     #[inline]
     pub fn pop(&mut self) -> Result<Entry<T>, PopError<T>> {
-        let deadline = match self.deadline {
-            Some(deadline) => deadline,
-            None => return Err(PopError::Uninitialized),
+        let Some(deadline) = self.deadline else {
+            return Err(PopError::Uninitialized);
         };
         let now = Instant::now();
         let time_to_maturity = deadline.checked_duration_since(now);
@@ -179,12 +181,11 @@ impl<T> JitterBuf<T> {
             .inner
             .get_mut(index)
             .expect("index should be in bounds");
-        self.pop_seq = match self.pop_seq.checked_add(1) {
-            Some(res) => res,
-            None => {
-                let entries = self.reset();
-                return Err(PopError::SeqOverflow(entries));
-            }
+        self.pop_seq = if let Some(res) = self.pop_seq.checked_add(1) {
+            res
+        } else {
+            let entries = self.reset();
+            return Err(PopError::SeqOverflow(entries));
         };
         match value.take() {
             Some(entry) => {
@@ -233,6 +234,12 @@ impl<T> JitterBuf<T> {
         self.len
     }
 
+    #[must_use]
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     /// The capacity of the `JitterBuf`.
     #[must_use]
     #[inline]
@@ -249,14 +256,15 @@ impl<T> JitterBuf<T> {
         self.len = 0;
         self.push_seq = None;
         self.deadline = None;
-        self.inner.iter_mut().filter_map(|v| v.take()).collect()
+        self.inner.iter_mut().filter_map(Option::take).collect()
     }
 
     /// Returns the index of the `sequence_number`.
     ///
     /// The index is always valid.
-    fn index_from_seq(&self, seq: u64) -> usize {
-        let index = (seq % self.inner.len() as u64) as usize;
+    fn index_from_seq(&self, seq: SequenceNumber) -> usize {
+        let index = usize::try_from(seq % self.inner.len() as SequenceNumber)
+            .expect("should be able to convert index into `usize`");
         debug_assert!(self.inner.get(index).is_some());
 
         index

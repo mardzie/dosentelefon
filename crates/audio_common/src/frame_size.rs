@@ -3,13 +3,14 @@ use crate::SAMPLE_RATE_48K;
 const _: () = assert!(FrameSize::Ms20.samples(SAMPLE_RATE_48K) == 960);
 
 /// Legal Opus frame durations (libopus >= 1.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FrameSize {
     /// CELT-only => no in-band FEC
     Ms2_5 = 1,
     /// CELT-only => no in-band FEC
     Ms5 = 2,
     Ms10 = 4,
+    #[default]
     Ms20 = 8,
     Ms40 = 16,
     Ms60 = 24,
@@ -26,7 +27,7 @@ impl FrameSize {
     #[must_use]
     #[inline]
     pub const fn samples(self, sample_rate: u32) -> u64 {
-        (sample_rate as u64 * self as u64).div_ceil(Self::UNITS_PER_SECOND) as u64
+        (sample_rate as u64 * self as u64).div_ceil(Self::UNITS_PER_SECOND)
     }
 
     /// Can support FEC.
@@ -83,11 +84,5 @@ impl TryFrom<opus::FrameSize> for FrameSize {
             Fs::Ms120 => Self::Ms120,
             fs => return Err(crate::error::OpusFrameSizeVariantUsupported(fs)),
         })
-    }
-}
-
-impl Default for FrameSize {
-    fn default() -> Self {
-        Self::Ms20
     }
 }
