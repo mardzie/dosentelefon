@@ -8,7 +8,7 @@ use std::{
 use audio_common::frame_size::FrameSize;
 pub use entry::Entry;
 
-use crate::error::{PopError, PushError};
+use crate::error::{OutOfWindow, PopError, PushError};
 
 mod entry;
 
@@ -109,25 +109,25 @@ impl<T> JitterBuf<T> {
     pub fn push(&mut self, entry: Entry<T>) -> Result<(), (PushError, Entry<T>)> {
         let seq = entry.seq();
 
+        // Allows to reset the state.
         if self.deadline.is_none() {
             self.pop_seq = seq;
         }
 
-        if seq < self.pop_seq {
-            return Err((PushError::LatePacket { seq }, entry));
-        }
-        let cap = self.inner.len() as u64;
-        if seq - self.pop_seq >= cap {
-            return Err((
-                PushError::TooFarAhead {
-                    seq,
-                    window_end: self.pop_seq + cap - 1,
-                },
-                entry,
-            ));
-        }
+        let index = match self.slot_index(seq) {
+            Ok(index) => index,
+            Err(OutOfWindow::Behind) => return Err((PushError::LatePacket { seq }, entry)),
+            Err(OutOfWindow::Ahead) => {
+                return Err((
+                    PushError::TooFarAhead {
+                        seq,
+                        window_end: self.pop_seq + self.inner.len() as u64 - 1,
+                    },
+                    entry,
+                ));
+            }
+        };
 
-        let index = self.index_from_seq(seq);
         let value = self.inner.get_mut(index).expect("index must be in bounds");
         if value.is_some() {
             return Err((PushError::Duplicate { seq }, entry));
@@ -136,6 +136,7 @@ impl<T> JitterBuf<T> {
         *value = Some(entry);
         self.push_seq = self.push_seq.max(Some(seq));
         self.len += 1;
+        // Allows to reset the state.
         if self.deadline.is_none() {
             self.deadline = Some(self.calculate_deadline());
         }
@@ -176,7 +177,7 @@ impl<T> JitterBuf<T> {
             .expect("no system should ever be running for this long")
             .into();
 
-        let index = self.index_from_seq(self.pop_seq());
+        let index = self.wrapping_index(self.pop_seq());
         let value = self
             .inner
             .get_mut(index)
@@ -259,19 +260,17 @@ impl<T> JitterBuf<T> {
         self.inner.iter_mut().filter_map(Option::take).collect()
     }
 
-    /// Checks if the sequence number is in bounds.
-    ///
-    /// In bounds means that the sequence number is greater than the last popped sequence number
-    /// and smaller than a full wrap around of the ring.
-    /// A full wrap around would land on the to be popped slot, so it has to be smaller.
+    /// Gets the index for the sequence number.
     #[must_use]
     #[inline]
-    pub fn seq_in_bounds(&self, seq: SequenceNumber) -> bool {
-        self.pop_seq >= seq
-            && seq
-                < self.pop_seq
-                    + u64::try_from(self.inner.len())
-                        .expect("should be able to convert the ring buf len to u64")
+    fn slot_index(&self, seq: SequenceNumber) -> Result<usize, OutOfWindow> {
+        let Some(offset) = seq.checked_sub(self.pop_seq) else {
+            return Err(OutOfWindow::Behind);
+        };
+        if offset >= self.inner.len() as u64 {
+            return Err(OutOfWindow::Ahead);
+        }
+        Ok(self.wrapping_index(seq))
     }
 
     // When view types are finally stabilized...
@@ -296,7 +295,7 @@ impl<T> JitterBuf<T> {
     /// Returns the index of the `sequence_number`.
     ///
     /// The index is always valid.
-    fn index_from_seq(&self, seq: SequenceNumber) -> usize {
+    fn wrapping_index(&self, seq: SequenceNumber) -> usize {
         let index = usize::try_from(seq % self.inner.len() as SequenceNumber)
             .expect("should be able to convert index into `usize`");
         debug_assert!(self.inner.get(index).is_some());

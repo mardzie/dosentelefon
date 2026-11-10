@@ -29,3 +29,15 @@ pub enum PopError<T> {
     #[error("sequence number overflow")]
     SeqOverflow(Vec<Entry<T>>),
 }
+
+/// The position of a sequence number in the `JitterBuf`.
+#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum OutOfWindow {
+    /// Sequence number is smaller than the next to be popped sequence number.
+    #[error("behind window")]
+    Behind,
+    /// Sequence number is larger than a full wrap around of the ring buffer subtracting 1.
+    /// (`len - 1`)
+    #[error("ahead window")]
+    Ahead,
+}
