@@ -51,9 +51,11 @@ impl<T> JitterBuf<T> {
     /// `target_delay.div_ceil(frame_size.duration())` -> `100 ms / 20 ms = 5 packets`
     /// (The result will be multiplied by the `DEFAULT_CAPACITY_MULTIPLIER` to acomodate bursts of packets or if packets got popped late.)
     ///
-    /// Returns `None` when the division of `target_delay` and `frame_size.duration()` nanos does not fit into a `usize`.
+    /// # Panic
+    ///
+    /// Panics when the division of `target_delay` and `frame_size.duration()` nanos times the multiplier does not fit into a `usize`.
     #[must_use]
-    pub fn new(target_delay: Duration, frame_size: FrameSize) -> Option<Self> {
+    pub fn new(target_delay: Duration, frame_size: FrameSize) -> Self {
         Self::with_multiplier(target_delay, frame_size, Self::DEFAULT_CAPACTITY_MULTIPLIER)
     }
 
@@ -65,23 +67,26 @@ impl<T> JitterBuf<T> {
     /// `target_delay.div_ceil(frame_size.duration())` -> `100 ms / 20 ms = 5 packets`
     /// The result will be multiplied by the `capacity_multiplier` to acomodate bursts of packets or if packets got popped late.
     ///
-    /// Returns `None` when the division of `target_delay` and `frame_size.duration()` nanos does not fit into a `usize`.
+    /// # Panics
+    ///
+    /// Panics when the division of `target_delay` and `frame_size.duration()` nanos times the multiplier does not fit into a `usize`.
     #[must_use]
     pub fn with_multiplier(
         target_delay: Duration,
         frame_size: FrameSize,
         // To multiply the necessary capacity for bursts of incoming packets.
         capacity_multiplier: NonZeroUsize,
-    ) -> Option<Self> {
+    ) -> Self {
         let capacity = target_delay
             .as_nanos()
             .div_ceil(frame_size.duration().as_nanos())
             + 2;
         let n = usize::try_from(capacity)
             .ok()
-            .and_then(|c| c.checked_mul(capacity_multiplier.get()))?;
+            .and_then(|c| c.checked_mul(capacity_multiplier.get()))
+            .expect("`usize` overflow");
 
-        Some(Self {
+        Self {
             inner: std::iter::repeat_with(|| None).take(n).collect(),
             pop_seq: 0,
             push_seq: None,
@@ -90,7 +95,7 @@ impl<T> JitterBuf<T> {
 
             target_delay,
             frame_size,
-        })
+        }
     }
 
     /// Push a `Entry` to the `JitterBuf`.
@@ -316,7 +321,6 @@ where
 {
     fn default() -> Self {
         Self::new(Duration::from_millis(100), FrameSize::default())
-            .expect("default values should be valid")
     }
 }
 
@@ -344,7 +348,7 @@ mod jitter_buf_test {
         }
 
         let target_delay = Duration::from_millis(100);
-        let mut jb = JitterBuf::new(target_delay, FrameSize::default()).unwrap();
+        let mut jb = JitterBuf::new(target_delay, FrameSize::default());
         for entry in entries.clone() {
             info!(
                 "Pushing entry with seq: {}, timestamp {:?}, inner: {}",
@@ -377,7 +381,7 @@ mod jitter_buf_test {
         logging_setup();
 
         let target_delay = Duration::from_millis(100);
-        let mut jb: JitterBuf<i32> = JitterBuf::new(target_delay, FrameSize::default()).unwrap();
+        let mut jb: JitterBuf<i32> = JitterBuf::new(target_delay, FrameSize::default());
 
         let now = Instant::now();
         let entry = Entry::new(0, now, 32);
