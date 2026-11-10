@@ -261,7 +261,6 @@ impl<T> JitterBuf<T> {
     }
 
     /// Gets the index for the sequence number.
-    #[must_use]
     #[inline]
     fn slot_index(&self, seq: SequenceNumber) -> Result<usize, OutOfWindow> {
         let Some(offset) = seq.checked_sub(self.pop_seq) else {
