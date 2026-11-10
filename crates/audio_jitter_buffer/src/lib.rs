@@ -221,18 +221,6 @@ impl<T> JitterBuf<T> {
         self.pop_seq
     }
 
-    /// The current sequence number window length.
-    ///
-    /// Returns `None` when no `Entry` got pushed yet.
-    #[must_use]
-    #[inline]
-    pub fn window_len(&self) -> Option<usize> {
-        Some(
-            usize::try_from((self.push_seq?.checked_add(1)?).saturating_sub(self.pop_seq))
-                .expect("`push_seq - pop_seq` should be convertible to `usize`"),
-        )
-    }
-
     /// The currently stored `Entry` count.
     #[must_use]
     #[inline]
