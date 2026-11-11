@@ -8,7 +8,7 @@ use std::{
 use audio_common::frame_size::FrameSize;
 pub use entry::Entry;
 
-use crate::error::{OutOfWindow, PopError, PushError};
+use crate::error::{OutOfWindow, PushError};
 
 mod entry;
 
@@ -23,19 +23,17 @@ pub type SequenceNumber = u64;
 /// The `JitterBuf` is implemented as a ring buffer over `Option<Entry<T>>`.
 #[derive(Debug)]
 pub struct JitterBuf<T> {
-    inner: Vec<Option<Entry<T>>>,
-    /// The biggest pushed sequence number.
-    ///
-    /// Not all slots between `pop_seq` and `push_seq` must be filled.
-    push_seq: Option<SequenceNumber>,
-    /// The next sequence number to be popped.
-    pop_seq: SequenceNumber,
-    /// The time when a new entry can get popped.
-    deadline: Option<Instant>,
+    slots: Vec<Option<Entry<T>>>,
+    /// Next slot to release. Anything below it is late.
+    next_seq: SequenceNumber,
+    /// One past the newest buffered frame.
+    /// Invariant: `next_seq <= end <= next_seq + N`.
+    end: SequenceNumber,
     /// The currently stored `Entry` count.
     len: usize,
+    state: State,
 
-    target_delay: Duration,
+    delay: Duration,
     frame_size: FrameSize,
 }
 
@@ -72,153 +70,138 @@ impl<T> JitterBuf<T> {
     /// Panics when the division of `target_delay` and `frame_size.duration()` nanos times the multiplier does not fit into a `usize`.
     #[must_use]
     pub fn with_multiplier(
-        target_delay: Duration,
+        delay: Duration,
         frame_size: FrameSize,
         // To multiply the necessary capacity for bursts of incoming packets.
         capacity_multiplier: NonZeroUsize,
     ) -> Self {
-        let capacity = target_delay
-            .as_nanos()
-            .div_ceil(frame_size.duration().as_nanos())
-            + 2;
+        let capacity = delay.as_nanos().div_ceil(frame_size.duration().as_nanos()) + 2;
         let n = usize::try_from(capacity)
             .ok()
             .and_then(|c| c.checked_mul(capacity_multiplier.get()))
             .expect("`usize` overflow");
 
         Self {
-            inner: std::iter::repeat_with(|| None).take(n).collect(),
-            pop_seq: 0,
-            push_seq: None,
-            deadline: None,
+            slots: std::iter::repeat_with(|| None).take(n).collect(),
+            next_seq: 0,
+            end: 0,
             len: 0,
+            state: State::Idle,
 
-            target_delay,
+            delay,
             frame_size,
         }
     }
 
-    /// Push a `Entry` to the `JitterBuf`.
+    /// Puts a received frame into its slot.
     ///
     /// # Errors
     ///
-    /// If a sequence number is pushed multiple times only the first gets accepted, other will get rejected with [`PushError::Duplicate`].
-    ///
-    /// If the push side of the ring buffer touches the pop side then [`PushError::TooFarAhead`] gets returned.
-    /// This can be fixed if a entry gets popped, then there is space for a new push.
-    ///
-    /// A entry with a sequence number smaller than the last popped one errors with [`PushError::LatePacket`].
-    ///
-    /// Initializes the `JitterBuf` on first call.
+    /// Returns a [`PushError`] and `Entry` when its late or a duplicate.
     #[inline]
     pub fn push(&mut self, entry: Entry<T>) -> Result<(), (PushError, Entry<T>)> {
         let seq = entry.seq();
-
-        // Allows to reset the state.
-        if self.deadline.is_none() {
-            self.pop_seq = seq;
-        }
-
         let index = match self.slot_index(seq) {
             Ok(index) => index,
-            Err(OutOfWindow::Behind) => return Err((PushError::LatePacket { seq }, entry)),
+            Err(OutOfWindow::Behind) => return Err((PushError::Late { seq }, entry)),
             Err(OutOfWindow::Ahead) => {
-                return Err((
-                    PushError::TooFarAhead {
-                        seq,
-                        window_end: self.pop_seq + self.inner.len() as u64 - 1,
-                    },
-                    entry,
-                ));
+                // Too far ahead. Slide window forward dropping the oldest frames.
+                let new_start = seq + 1 - self.capacity() as u64;
+                for s in self.next_seq..new_start.min(self.end) {
+                    let index = self.wrapping_index(s);
+                    let slot = self
+                        .slots
+                        .get_mut(index)
+                        .expect("index should be always valid");
+                    *slot = None;
+                }
+                self.next_seq = new_start;
+                self.wrapping_index(seq)
             }
         };
 
-        let value = self.inner.get_mut(index).expect("index must be in bounds");
-        if value.is_some() {
+        let slot = self.slots.get_mut(index).expect("index must be in bounds");
+        if slot.is_some() {
             return Err((PushError::Duplicate { seq }, entry));
         }
-
-        *value = Some(entry);
-        self.push_seq = self.push_seq.max(Some(seq));
-        self.len += 1;
-        // Allows to reset the state.
-        if self.deadline.is_none() {
-            self.deadline = Some(self.calculate_deadline());
+        if matches!(self.state, State::Idle) {
+            self.state = State::Buffering {
+                start: entry.timestamp() + self.delay,
+            };
         }
-
+        *slot = Some(entry);
+        self.end = self.end.max(seq + 1);
+        self.len += 1;
         Ok(())
     }
 
-    /// Pop the next `Entry` from the `JitterBuf`.
+    /// Release the next slot if its due at `now`.
     ///
-    /// # Errors
-    ///
-    /// [`PopError::NotReady`] is returned if the `target_delay` didn't yet pass.
-    ///
-    /// [`PopError::Underrun`] is returned if a mature slot has no entry present.
-    /// Depending on the codec this should be signalled to the codec.
-    ///
-    /// [`PopError::Uninitialized`] is returned if the `JitterBuf` has not been initialized by a `JitterBuf::push`.
-    /// A call to [`JitterBuf::push`] will initialize the `JitterBuf`.
-    ///
-    /// [`PopError::SeqOverflow`] is returned if the sequence number overflows `u64::MAX`.
-    /// If `SeqOverflow` is returned the `JitterBuf` automatically reset itself and can accept any sequence number again.
-    /// This error should generally never be returned because it would take 1.46 billion years at 2.5 ms.
-    /// (`2^64 * 0.0025 / 60 / 60 / 24 / 365.25 = 1,461,355,115.226566 years`))
-    ///
-    /// See [`JitterBuf::reset()`] for more info
+    /// Call in a loop until `None` to drain everything that is due.
     #[inline]
-    pub fn pop(&mut self) -> Result<Entry<T>, PopError<T>> {
-        let Some(deadline) = self.deadline else {
-            return Err(PopError::Uninitialized);
+    pub fn pop(&mut self, now: Instant) -> Option<Slot<T>> {
+        let due = match self.state {
+            State::Idle => return None,
+            State::Buffering { start: due } | State::Playing { due } => due,
         };
-        let now = Instant::now();
-        let time_to_maturity = deadline.checked_duration_since(now);
-        if let Some(duration) = time_to_maturity {
-            return Err(PopError::NotReady(duration));
+        if now < due {
+            return None;
         }
-        self.deadline = deadline
-            .checked_add(self.frame_size.duration())
-            .expect("no system should ever be running for this long")
-            .into();
-
-        let index = self.wrapping_index(self.pop_seq());
-        let value = self
-            .inner
-            .get_mut(index)
-            .expect("index should be in bounds");
-        self.pop_seq = if let Some(res) = self.pop_seq.checked_add(1) {
-            res
-        } else {
-            let entries = self.reset();
-            return Err(PopError::SeqOverflow(entries));
-        };
-        match value.take() {
-            Some(entry) => {
-                debug_assert_eq!(entry.seq(), self.pop_seq() - 1);
-                self.len -= 1;
-                Ok(entry)
+        if self.next_seq == self.end {
+            // Underrun
+            // Sender paused or network stalled.
+            // Start buffering again with next push.
+            self.state = State::Idle;
+            return None;
+        }
+        if matches!(self.state, State::Buffering { .. }) {
+            // Playback (re)starts at the oldest buffered frame.
+            // Terminates: frame `end - 1` is always buffered.
+            while self
+                .slots
+                .get(self.wrapping_index(self.next_seq))
+                .expect("index should always be valid")
+                .is_none()
+            {
+                self.next_seq += 1;
             }
-            None => Err(PopError::Underrun),
         }
+
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        self.len -= 1;
+        self.state = State::Playing {
+            due: due + self.frame_size.duration(),
+        };
+
+        let index = self.wrapping_index(seq);
+        Some(
+            match self
+                .slots
+                .get_mut(index)
+                .expect("index should always be valid")
+                .take()
+            {
+                Some(entry) => Slot::Frame(entry),
+                None => Slot::Missing(seq),
+            },
+        )
     }
 
-    /// The biggest pushed sequence number.
+    /// The biggest buffered sequence number.
     ///
-    /// Returns `None` if no `Entry` got pushed yet.
-    ///
-    /// Not all slots between `pop_seq` and `push_seq` must be filled.
+    /// Not all slots between `next_released_seq()` and `end_seq()` must be filled.
     #[must_use]
     #[inline]
-    pub fn push_seq(&self) -> Option<u64> {
-        self.push_seq
+    pub fn end_seq(&self) -> SequenceNumber {
+        self.end
     }
 
     /// The next sequence number to be popped.
     #[must_use]
     #[inline]
-    pub fn pop_seq(&self) -> u64 {
-        self.pop_seq
+    pub fn next_released_seq(&self) -> SequenceNumber {
+        self.next_seq
     }
 
     /// The currently stored `Entry` count.
@@ -238,28 +221,16 @@ impl<T> JitterBuf<T> {
     #[must_use]
     #[inline]
     pub fn capacity(&self) -> usize {
-        self.inner.len()
-    }
-
-    /// Resets the `JitterBuf`.
-    ///
-    /// After resetting it accepts any sequence number again.
-    /// Returns all `Entry`'s in the buffer.
-    #[inline]
-    pub fn reset(&mut self) -> Vec<Entry<T>> {
-        self.len = 0;
-        self.push_seq = None;
-        self.deadline = None;
-        self.inner.iter_mut().filter_map(Option::take).collect()
+        self.slots.len()
     }
 
     /// Gets the index for the sequence number.
     #[inline]
     fn slot_index(&self, seq: SequenceNumber) -> Result<usize, OutOfWindow> {
-        let Some(offset) = seq.checked_sub(self.pop_seq) else {
+        let Some(offset) = seq.checked_sub(self.next_seq) else {
             return Err(OutOfWindow::Behind);
         };
-        if offset >= self.inner.len() as u64 {
+        if offset >= self.slots.len() as u64 {
             return Err(OutOfWindow::Ahead);
         }
         Ok(self.wrapping_index(seq))
@@ -287,19 +258,12 @@ impl<T> JitterBuf<T> {
     /// Returns the index of the `sequence_number`.
     ///
     /// The index is always valid.
+    #[allow(clippy::cast_possible_truncation)] // result < N
     fn wrapping_index(&self, seq: SequenceNumber) -> usize {
-        let index = usize::try_from(seq % self.inner.len() as SequenceNumber)
-            .expect("should be able to convert index into `usize`");
-        debug_assert!(self.inner.get(index).is_some());
+        let index = (seq % self.slots.len() as u64) as usize;
+        debug_assert!(self.slots.get(index).is_some());
 
         index
-    }
-
-    fn calculate_deadline(&self) -> Instant {
-        Instant::now()
-            .checked_add(self.target_delay.checked_add(self.frame_size.duration())
-                .expect("`target_delay` and `frame_size.duration()` should not be overflowing addition"))
-            .expect("`target_delay + frame_size` should not overflow `Instant::now()`")
     }
 }
 
@@ -312,6 +276,26 @@ where
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+enum State {
+    /// Waiting for a frame (startup or after an underrun).
+    #[default]
+    Idle,
+    /// Holding frames. The first slot is released at `start`.
+    Buffering { start: Instant },
+    /// Releasing one slot per frame duration. The next one is due at `due`.
+    Playing { due: Instant },
+}
+
+/// A slot released by [`JitterBuf::pop()`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Slot<T> {
+    /// The frame arrived in time.
+    Frame(Entry<T>),
+    /// The frame is lost or too late.
+    Missing(SequenceNumber),
+}
+
 #[cfg(test)]
 mod jitter_buf_test {
     use std::time::{Duration, Instant};
@@ -319,7 +303,7 @@ mod jitter_buf_test {
     use audio_common::frame_size::FrameSize;
     use tracing::info;
 
-    use crate::{Entry, JitterBuf, error::PopError};
+    use crate::{Entry, JitterBuf, Slot};
 
     #[test]
     fn test_push() {
@@ -347,7 +331,7 @@ mod jitter_buf_test {
             jb.push(entry).unwrap();
         }
 
-        for (i, opt_entry) in jb.inner[..N].iter().enumerate() {
+        for (i, opt_entry) in jb.slots[..N].iter().enumerate() {
             let entry = opt_entry
                 .as_ref()
                 .expect("entry should have been written to this index");
@@ -357,11 +341,6 @@ mod jitter_buf_test {
                 entry, i, entries[i]
             )
         }
-        assert_eq!(
-            jb.push_seq()
-                .expect("should be available because it was pushed to the `JitterBuf`"),
-            u64::try_from(N - 1).expect("should be convertible to `u64`")
-        );
     }
 
     #[test]
@@ -376,22 +355,17 @@ mod jitter_buf_test {
         jb.push(entry.clone()).unwrap();
 
         let (popped, timestamp) = loop {
-            match jb.pop() {
-                Ok(entry) => break (entry, Instant::now()),
-                Err(PopError::Underrun) => panic!("Can not underrun"),
-                Err(PopError::NotReady(dur)) => {
-                    assert!(
-                        dur <= target_delay + jb.frame_size.duration(),
-                        "duration to ready must be smaller than the target delay"
-                    )
-                }
-                Err(PopError::Uninitialized) => panic!("Should be initialized"),
-                Err(PopError::SeqOverflow(_)) => panic!("Sequence number should not overflow"),
+            let now = Instant::now();
+            if let Some(entry) = jb.pop(now) {
+                break (entry, now);
             };
         };
 
-        assert_eq!(popped, entry);
-        assert!(timestamp.duration_since(now) > jb.target_delay + jb.frame_size.duration());
+        match popped {
+            Slot::Frame(popped_entry) => assert_eq!(popped_entry, entry),
+            Slot::Missing(seq) => panic!("Missing {seq}"),
+        }
+        assert!(timestamp.duration_since(now) > jb.delay + jb.frame_size.duration() * 2);
     }
 
     fn logging_setup() {
