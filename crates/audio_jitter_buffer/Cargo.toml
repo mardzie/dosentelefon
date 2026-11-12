@@ -8,6 +8,3 @@ audio_common.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-
-[dev-dependencies]
-tracing-subscriber.workspace = true
