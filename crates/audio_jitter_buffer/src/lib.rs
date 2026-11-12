@@ -8,7 +8,7 @@ use std::{
 use audio_common::frame_size::FrameSize;
 pub use entry::Entry;
 
-use crate::error::{OutOfWindow, PushError};
+use crate::error::{OutOfWindow, PopError, PushError};
 
 mod entry;
 
@@ -139,20 +139,20 @@ impl<T> JitterBuf<T> {
     ///
     /// Call in a loop until `None` to drain everything that is due.
     #[inline]
-    pub fn pop(&mut self, now: Instant) -> Option<Slot<T>> {
+    pub fn pop(&mut self, now: Instant) -> Result<Slot<T>, PopError> {
         let due = match self.state {
-            State::Idle => return None,
+            State::Idle => return Err(PopError::Empty),
             State::Buffering { start: due } | State::Playing { due } => due,
         };
         if now < due {
-            return None;
+            return Err(PopError::Early { due });
         }
         if self.next_seq == self.end {
             // Underrun
             // Sender paused or network stalled.
             // Start buffering again with next push.
             self.state = State::Idle;
-            return None;
+            return Err(PopError::Empty);
         }
         if matches!(self.state, State::Buffering { .. }) {
             // Playback (re)starts at the oldest buffered frame.
@@ -175,7 +175,7 @@ impl<T> JitterBuf<T> {
         };
 
         let index = self.wrapping_index(seq);
-        Some(
+        Ok(
             match self
                 .slots
                 .get_mut(index)
@@ -303,7 +303,7 @@ mod jitter_buf_test {
     use audio_common::frame_size::FrameSize;
     use tracing::info;
 
-    use crate::{Entry, JitterBuf, Slot};
+    use crate::{Entry, JitterBuf, Slot, error::PopError};
 
     #[test]
     fn test_push() {
@@ -354,18 +354,30 @@ mod jitter_buf_test {
         let entry = Entry::new(0, now, 32);
         jb.push(entry.clone()).unwrap();
 
-        let (popped, timestamp) = loop {
+        let (popped, timestamp) = 'wait_loop: loop {
             let now = Instant::now();
-            if let Some(entry) = jb.pop(now) {
-                break (entry, now);
+            match jb.pop(now) {
+                Ok(s) => break 'wait_loop (s, now),
+                Err(PopError::Early { due }) => {
+                    std::thread::sleep(due.saturating_duration_since(Instant::now()));
+                    continue;
+                }
+                Err(PopError::Empty) => panic!("Can not be empty"),
             };
         };
 
         match popped {
             Slot::Frame(popped_entry) => assert_eq!(popped_entry, entry),
-            Slot::Missing(seq) => panic!("Missing {seq}"),
+            Slot::Missing(seq) => panic!("Missing {seq} but must be there"),
         }
-        assert!(timestamp.duration_since(now) > jb.delay + jb.frame_size.duration() * 2);
+        let time_since = timestamp.saturating_duration_since(now);
+        let max_delay = jb.delay + jb.frame_size.duration() * 2;
+        assert!(
+            time_since < max_delay,
+            "{} > {}",
+            time_since.as_millis(),
+            max_delay.as_millis()
+        );
     }
 
     fn logging_setup() {
