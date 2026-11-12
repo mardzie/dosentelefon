@@ -93,6 +93,16 @@ impl<T> JitterBuf<T> {
         }
     }
 
+    /// Reset the `JitterBuf` into it's starting state.
+    #[inline]
+    pub fn reset(&mut self) -> Vec<Entry<T>> {
+        self.next_seq = 0;
+        self.end = 0;
+        self.len = 0;
+        self.state = State::Idle;
+        self.slots.iter_mut().filter_map(|e| e.take()).collect()
+    }
+
     /// Puts a received frame into its slot.
     ///
     /// # Errors
