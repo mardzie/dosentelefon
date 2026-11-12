@@ -1,6 +1,10 @@
 use std::{collections::VecDeque, io, net::ToSocketAddrs};
 
-use crate::{helpers::VERSION_NUMBER, udp_packet_net::{self, UdpPacketNet, packet::Packet}, voice_net::packets::BufferedPacket};
+use crate::{
+    helpers::VERSION_NUMBER,
+    udp_packet_net::{self, UdpPacketNet, packet::Packet},
+    voice_net::packets::BufferedPacket,
+};
 
 pub mod error;
 pub(crate) mod packets;

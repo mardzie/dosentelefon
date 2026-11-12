@@ -150,14 +150,14 @@ impl std::fmt::Display for FriendCode {
 }
 
 #[derive(thiserror::Error, Debug, Clone)]
-#[error("Invalid Friend Code String")]
+#[error("invalid friend code string")]
 pub struct InvalidFriendCodeString;
 
 #[derive(thiserror::Error, Debug)]
 pub enum IpError {
-    #[error("Local Ip Error: {0}")]
+    #[error("local ip error: {0}")]
     Local(#[from] local_ip_address::Error),
-    #[error("Public Ip Error: {0}")]
+    #[error("public ip error: {0}")]
     Public(#[from] public_ip_address::error::Error),
 }
 

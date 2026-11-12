@@ -6,11 +6,8 @@ edition = "2024"
 [dependencies]
 chrono.workspace = true
 color-eyre.workspace = true
-cpal = "0.17.3"
-crc32fast = "1.5.0"
+crc32fast = "1.5.5"
 crossbeam.workspace = true
-dasp = "0.11.0"
-opus = "0.3.1"
 postcard.workspace = true
 rayon.workspace = true
 ringbuf.workspace = true

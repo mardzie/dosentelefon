@@ -3,7 +3,6 @@ name = "net_lib"
 version = "0.1.0"
 edition = "2024"
 description = "A small and simple networking wrapper crate."
-readme = "README.md"
 license = "MIT"
 
 [dependencies]

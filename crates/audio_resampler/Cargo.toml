@@ -1,0 +1,11 @@
+[package]
+name = "audio_resampler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+audio_common.workspace = true
+audio_stream.workspace = true
+rubato = "5.0.1"
+thiserror.workspace = true
+tracing.workspace = true

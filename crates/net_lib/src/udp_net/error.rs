@@ -14,10 +14,10 @@ pub type PeekError = RecvError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RecvError {
-    #[error("{0}")]
+    #[error(transparent)]
     Io(#[from] io::Error),
-    #[error("{0}")]
+    #[error(transparent)]
     Deserialize(#[from] postcard::Error),
-    #[error("Datagram Truncated Error: The datagram was truncated")]
+    #[error("datagram truncated error: the datagram was truncated")]
     DatagramTruncated,
 }

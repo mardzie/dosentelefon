@@ -4,15 +4,15 @@ use cpal::{DefaultStreamConfigError, SupportedStreamConfigsError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Default {0} Device not available.")]
+    #[error("default {0} device not available.")]
     DefaultDeviceNotAvailable(DeviceType),
-    #[error("{0} Device not available")]
+    #[error("{0} device not available")]
     DeviceNotAvailable(DeviceType),
-    #[error("{0} Backend specific Error: {1}")]
+    #[error("{0} backend specific error: {1}")]
     BackendSpecific(DeviceType, cpal::BackendSpecificError),
-    #[error("Failed to build {0} Stream: {1}")]
+    #[error("failed to build {0} stream: {1}")]
     BuildStream(DeviceType, cpal::BuildStreamError),
-    #[error("Invalid Argument in {0} Device")]
+    #[error("ivalid argument in {0} Device")]
     InvalidArgument(DeviceType),
 }
 

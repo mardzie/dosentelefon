@@ -1,8 +1,6 @@
 use std::io;
 
-use thiserror::Error;
-
-#[derive(Debug, Error)]
+#[derive(thiserror::Error, Debug)]
 pub enum SendError {
     #[error("Send IO Error: {0}")]
     Io(#[from] io::Error),
@@ -10,10 +8,10 @@ pub enum SendError {
     WouldBlock,
 }
 
-#[derive(Debug, Error)]
+#[derive(thiserror::Error, Debug)]
 pub enum RecvError {
-    #[error("Recv IO Error: {0}")]
+    #[error("recv io error: {0}")]
     Io(#[from] io::Error),
-    #[error("Checksum Mismatch")]
+    #[error("checksum mismatch")]
     ChecksumMismatch,
 }

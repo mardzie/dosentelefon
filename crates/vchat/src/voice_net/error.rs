@@ -4,9 +4,9 @@ use crate::udp_packet_net;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SendError {
-    #[error("Send Error: {0}")]
+    #[error("send error: {0}")]
     Io(#[from] io::Error),
-    #[error("Would Block")]
+    #[error("would block")]
     WouldBlock,
 }
 

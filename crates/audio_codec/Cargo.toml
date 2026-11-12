@@ -1,0 +1,10 @@
+[package]
+name = "audio_codec"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+audio_common.workspace = true
+opus.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
