@@ -179,7 +179,6 @@ impl<T> JitterBuf<T> {
 
         let seq = self.next_seq;
         self.next_seq += 1;
-        self.len -= 1;
         self.state = State::Playing {
             due: due + self.frame_size.duration(),
         };
@@ -192,7 +191,10 @@ impl<T> JitterBuf<T> {
                 .expect("index should always be valid")
                 .take()
             {
-                Some(entry) => Slot::Frame(entry),
+                Some(entry) => {
+                    self.len -= 1;
+                    Slot::Frame(entry)
+                }
                 None => Slot::Missing(seq),
             },
         )
