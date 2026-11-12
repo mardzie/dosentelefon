@@ -311,86 +311,89 @@ mod jitter_buf_test {
     use std::time::{Duration, Instant};
 
     use audio_common::frame_size::FrameSize;
-    use tracing::info;
 
-    use crate::{Entry, JitterBuf, Slot, error::PopError};
+    use crate::{Entry, JitterBuf, SequenceNumber, Slot, error::PopError};
 
-    #[test]
-    fn test_push() {
-        logging_setup();
+    const DELAY: Duration = Duration::from_millis(100);
 
-        const N: usize = 4;
-        let now = Instant::now();
-        let mut entries = Vec::with_capacity(N);
-        for i in 0..N {
-            let timestamp = now
-                .checked_add(Duration::from_millis(20 * i as u64))
-                .unwrap();
-            entries.push(Entry::new(i as u64, timestamp, i + 1));
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    enum Out {
+        Frame(SequenceNumber),
+        Missing(SequenceNumber),
+    }
+
+    fn setup<T>() -> (JitterBuf<T>, Instant, Duration) {
+        let fs = FrameSize::default();
+        let frame = fs.duration();
+        (JitterBuf::new(DELAY, fs), Instant::now(), frame)
+    }
+
+    fn drain<T>(jb: &mut JitterBuf<T>, now: Instant) -> Vec<Out> {
+        let mut out = Vec::new();
+        while let Ok(slot) = jb.pop(now) {
+            out.push(match slot {
+                Slot::Frame(e) => Out::Frame(e.seq()),
+                Slot::Missing(seq) => Out::Missing(seq),
+            });
+            check_invariants(jb);
         }
+        out
+    }
 
-        let target_delay = Duration::from_millis(100);
-        let mut jb = JitterBuf::new(target_delay, FrameSize::default());
-        for entry in entries.clone() {
-            info!(
-                "Pushing entry with seq: {}, timestamp {:?}, inner: {}",
-                entry.seq(),
-                entry.timestamp(),
-                entry.get()
-            );
-            jb.push(entry).unwrap();
-        }
+    fn push(jb: &mut JitterBuf<SequenceNumber>, seq: SequenceNumber, at: Instant) {
+        jb.push(Entry::new(seq, at, seq)).unwrap();
+        check_invariants(jb);
+    }
 
-        for (i, opt_entry) in jb.slots[..N].iter().enumerate() {
-            let entry = opt_entry
-                .as_ref()
-                .expect("entry should have been written to this index");
-            assert_eq!(
-                entry, &entries[i],
-                "Entry {:?} at {} should be {:?}",
-                entry, i, entries[i]
-            )
-        }
+    fn check_invariants<T>(jb: &JitterBuf<T>) {
+        assert!(jb.next_seq <= jb.end);
+        assert!(jb.end <= jb.next_seq + jb.capacity() as u64);
+        assert_eq!(jb.len, jb.slots.iter().flatten().count());
     }
 
     #[test]
-    fn test_delay() {
-        logging_setup();
+    fn release_exactly_at_delay() {
+        let (mut jb, t0, _) = setup();
+        push(&mut jb, 0, t0);
+        let due = t0 + DELAY;
+        assert!(matches!(jb.pop(t0), Err(PopError::Early { due: d }) if d == due));
+        assert!(matches!(
+            jb.pop(due - Duration::from_nanos(1)),
+            Err(PopError::Early { .. })
+        ));
+        assert_eq!(drain(&mut jb, due), [Out::Frame(0)])
+    }
 
-        let target_delay = Duration::from_millis(100);
-        let mut jb: JitterBuf<i32> = JitterBuf::new(target_delay, FrameSize::default());
+    #[test]
+    fn gap_during_playback_yields_missing() {
+        let (mut jb, t0, frame) = setup();
+        push(&mut jb, 0, t0);
+        push(&mut jb, 2, t0 + 2 * frame);
+        assert_eq!(
+            drain(&mut jb, t0 + DELAY + 2 * frame),
+            [Out::Frame(0), Out::Missing(1), Out::Frame(2)]
+        )
+    }
 
-        let now = Instant::now();
-        let entry = Entry::new(0, now, 32);
-        jb.push(entry.clone()).unwrap();
+    #[test]
+    fn underrun_rebuffers_with_full_delay() {
+        let (mut jb, t0, frame) = setup();
+        push(&mut jb, 0, t0);
+        assert_eq!(drain(&mut jb, t0 + DELAY + frame), [Out::Frame(0)]); // Second pop underruns
+        let t1 = t0 + 10 * frame;
+        push(&mut jb, 1, t1);
+        assert!(matches!(jb.pop(t1), Err(PopError::Early { due: d }) if d == t1 + DELAY))
+    }
 
-        let (popped, timestamp) = 'wait_loop: loop {
-            let now = Instant::now();
-            match jb.pop(now) {
-                Ok(s) => break 'wait_loop (s, now),
-                Err(PopError::Early { due }) => {
-                    std::thread::sleep(due.saturating_duration_since(Instant::now()));
-                    continue;
-                }
-                Err(PopError::Empty) => panic!("Can not be empty"),
-            };
-        };
-
-        match popped {
-            Slot::Frame(popped_entry) => assert_eq!(popped_entry, entry),
-            Slot::Missing(seq) => panic!("Missing {seq} but must be there"),
-        }
-        let time_since = timestamp.saturating_duration_since(now);
-        let max_delay = jb.delay + jb.frame_size.duration() * 2;
-        assert!(
-            time_since < max_delay,
-            "{} > {}",
-            time_since.as_millis(),
-            max_delay.as_millis()
+    #[test]
+    fn ordering() {
+        let (mut jb, t0, frame) = setup();
+        push(&mut jb, 2, t0);
+        push(&mut jb, 0, t0);
+        push(&mut jb, 1, t0);
+        assert_eq!(
+            drain(&mut jb, t0 + DELAY + 2 * frame),
+            [Out::Frame(0), Out::Frame(1), Out::Frame(2)]
         );
-    }
-
-    fn logging_setup() {
-        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     }
 }
