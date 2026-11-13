@@ -8,13 +8,11 @@ use crossbeam::channel::Receiver;
 use ringbuf::traits::{Consumer, Observer};
 
 use crate::{
-    audio::{Audio, InputMessage, audio_processor::AudioProcessor},
     types::{ArcMutex, ArcRwLock},
     udp_packet_net::MAX_PAYLOAD_SIZE,
     voice_net::VoiceNet,
 };
 
-mod audio;
 mod hash;
 mod helpers;
 mod types;
