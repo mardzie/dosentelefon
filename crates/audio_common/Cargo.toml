@@ -7,3 +7,6 @@ edition = "2024"
 opus.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[lints]
+workspace = true

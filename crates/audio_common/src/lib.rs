@@ -1,5 +1,3 @@
-#![warn(clippy::pedantic)]
-
 use std::num::NonZeroUsize;
 
 pub mod error;
