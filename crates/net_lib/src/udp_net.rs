@@ -7,9 +7,10 @@ use std::{
     net::{SocketAddr, ToSocketAddrs},
 };
 
-use crate::udp_net::{
-    inner::Inner,
-    macros::{buf_ops, socket_options},
+use crate::{
+    IPV4_HEADER_SIZE, IPV6_HEADER_SIZE,
+    macros::socket_options,
+    udp_net::{inner::Inner, macros::buf_ops},
 };
 
 mod inner;
@@ -21,23 +22,30 @@ mod udp_net_sender;
 pub mod error;
 
 use serde::{Serialize, de::DeserializeOwned};
-pub use traits::{BufOps, Receiver, Sender, SocketOptions};
+pub use traits::{BufOps, UdpReceiver, UdpSender};
 pub use udp_net_receiver::UdpNetReceiver;
 pub use udp_net_sender::UdpNetSender;
 
-/// This is used to measure if a datagram exceeded the buffer size.
-const TRUNCATION_BYTE: usize = 1;
-
-/// IPv4 normally is 20 bytes.
-const IPV4_HEADER_SIZE: usize = 20;
+/// RFC 791: Fragments must be able to be reassembled.
 const IPV4_MIN_MTU_SIZE: usize = 576;
-/// IPv6 has 40 bytes.
-const IPV6_HEADER_SIZE: usize = 40;
+/// RFC 8200: Every link must support an MTU of at least 1280.
 const IPV6_MIN_MTU_SIZE: usize = 1280;
 
 const UDP_HEADER_SIZE: usize = 8;
 const MAX_IPV4_DATAGRAM_SIZE: usize = u16::MAX as usize - IPV4_HEADER_SIZE - UDP_HEADER_SIZE;
 const MAX_IPV6_DATAGRAM_SIZE: usize = u16::MAX as usize - IPV6_HEADER_SIZE - UDP_HEADER_SIZE;
+
+impl crate::AddrType {
+    pub fn max_datagram_size(&self) -> usize {
+        match self {
+            Self::IPv4 => MAX_IPV4_DATAGRAM_SIZE,
+            Self::IPv6 => MAX_IPV6_DATAGRAM_SIZE,
+        }
+    }
+}
+
+/// This is used to measure if a datagram exceeded the buffer size.
+const TRUNCATION_BYTE: usize = 1;
 
 /// The maximum *reasonable* buffer size. The size of the biggest possible payload for **IPv4** subtracting headers.
 ///
@@ -132,7 +140,7 @@ where
     }
 }
 
-impl<P> Sender<P> for UdpNet<P>
+impl<P> UdpSender<P> for UdpNet<P>
 where
     P: Serialize + DeserializeOwned,
 {
@@ -178,7 +186,7 @@ where
     }
 }
 
-impl<P> Receiver<P> for UdpNet<P>
+impl<P> UdpReceiver<P> for UdpNet<P>
 where
     P: Serialize + DeserializeOwned,
 {

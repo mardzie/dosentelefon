@@ -5,10 +5,9 @@ use std::{
 
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::udp_net::{
-    Sender, error,
-    inner::Inner,
-    macros::{buf_ops, socket_options},
+use crate::{
+    macros::socket_options,
+    udp_net::{UdpSender, error, inner::Inner, macros::buf_ops},
 };
 
 #[derive(Debug)]
@@ -52,7 +51,7 @@ where
     }
 }
 
-impl<P> Sender<P> for UdpNetSender<P>
+impl<P> UdpSender<P> for UdpNetSender<P>
 where
     P: Serialize + DeserializeOwned,
 {

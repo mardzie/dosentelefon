@@ -7,10 +7,10 @@ use std::{
 use serde::{Serialize, de::DeserializeOwned};
 
 use super::error::SendError;
-use crate::udp_net::{
-    MAX_IPV4_DATAGRAM_SIZE, MAX_IPV6_DATAGRAM_SIZE,
-    error::{PeekError, RecvError},
+use crate::{
+    AddrType,
     macros::socket_options,
+    udp_net::error::{PeekError, RecvError},
 };
 
 #[derive(Debug)]
@@ -200,33 +200,6 @@ where
 }
 
 socket_options!(Inner, socket);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum AddrType {
-    IPv4,
-    IPv6,
-}
-
-impl AddrType {
-    pub fn max_datagram_size(&self) -> usize {
-        match self {
-            Self::IPv4 => MAX_IPV4_DATAGRAM_SIZE,
-            Self::IPv6 => MAX_IPV6_DATAGRAM_SIZE,
-        }
-    }
-}
-
-impl From<SocketAddr> for AddrType {
-    fn from(addr: SocketAddr) -> Self {
-        if addr.is_ipv4() {
-            Self::IPv4
-        } else if addr.is_ipv6() {
-            Self::IPv6
-        } else {
-            unreachable!("Unknown socket address type: {}", addr);
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

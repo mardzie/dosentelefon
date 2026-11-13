@@ -1,4 +1,4 @@
-use net_lib::udp_net::{Receiver, Sender, UdpNet};
+use net_lib::udp_net::{UdpReceiver, UdpSender, UdpNet};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
