@@ -7,7 +7,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::udp_net::error;
 
-pub trait UdpSender<P: Serialize + DeserializeOwned> {
+pub trait UdpWrite<P: Serialize + DeserializeOwned> {
     /// Send bytes directly to the connected address.
     ///
     /// The `buf`s content must be able to be turned back into `P` with the `Deserialize` trait or the receiver will get an error.
@@ -33,7 +33,7 @@ pub trait UdpSender<P: Serialize + DeserializeOwned> {
     fn send_to(&mut self, packet: &P, addr: impl ToSocketAddrs) -> Result<(), error::SendError>;
 }
 
-pub trait UdpReceiver<P: Serialize + DeserializeOwned> {
+pub trait UdpRead<P: Serialize + DeserializeOwned> {
     /// Peek a `P` from the connected address.
     ///
     /// This will not remove the `P` from the sockets received datagrams.

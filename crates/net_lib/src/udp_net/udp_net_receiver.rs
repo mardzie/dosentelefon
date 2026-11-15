@@ -7,7 +7,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     macros::socket_options,
-    udp_net::{UdpReceiver, error, inner::Inner, macros::buf_ops},
+    udp_net::{UdpRead, error, inner::Inner, macros::buf_ops},
 };
 
 #[derive(Debug)]
@@ -51,7 +51,7 @@ where
     }
 }
 
-impl<P> UdpReceiver<P> for UdpNetReceiver<P>
+impl<P> UdpRead<P> for UdpNetReceiver<P>
 where
     P: Serialize + DeserializeOwned,
 {

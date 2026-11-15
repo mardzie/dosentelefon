@@ -22,7 +22,7 @@ mod udp_net_sender;
 pub mod error;
 
 use serde::{Serialize, de::DeserializeOwned};
-pub use traits::{BufOps, UdpReceiver, UdpSender};
+pub use traits::{BufOps, UdpRead, UdpWrite};
 pub use udp_net_receiver::UdpNetReceiver;
 pub use udp_net_sender::UdpNetSender;
 
@@ -140,7 +140,7 @@ where
     }
 }
 
-impl<P> UdpSender<P> for UdpNet<P>
+impl<P> UdpWrite<P> for UdpNet<P>
 where
     P: Serialize + DeserializeOwned,
 {
@@ -186,7 +186,7 @@ where
     }
 }
 
-impl<P> UdpReceiver<P> for UdpNet<P>
+impl<P> UdpRead<P> for UdpNet<P>
 where
     P: Serialize + DeserializeOwned,
 {
