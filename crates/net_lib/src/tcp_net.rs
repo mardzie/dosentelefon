@@ -25,10 +25,11 @@ pub mod error;
 pub mod listener;
 pub mod traits;
 
+type Header = u16;
 /// Length field size.
-pub const HEADER_SIZE: usize = size_of::<u32>();
+pub const HEADER_SIZE: usize = size_of::<Header>();
 /// Default max payload size.
-pub const MAX_PAYLOAD_SIZE: u16 = u16::MAX; // 64 KiB
+pub const MAX_PAYLOAD_SIZE: Header = Header::MAX; // 64 KiB
 pub const MAX_PAYLOAD_SIZE_USIZE: usize = MAX_PAYLOAD_SIZE as usize;
 
 #[derive(Debug)]
@@ -78,12 +79,12 @@ where
         E: From<FrameError> + From<io::Error>,
     {
         self.buf.clear();
-        self.buf.put_u32(0); // Placeholder, patched below
+        self.buf.put_u16(0); // Placeholder, patched below
         fill(&mut self.buf)?;
 
         let payload_len = self.buf.len() - HEADER_SIZE;
         self.validate_payload_len(payload_len)?;
-        self.buf[..HEADER_SIZE].copy_from_slice(&(payload_len as u32).to_be_bytes());
+        self.buf[..HEADER_SIZE].copy_from_slice(&(payload_len as u16).to_be_bytes());
 
         self.stream.write_all(&self.buf)?;
         Ok(self.buf.len())
@@ -144,7 +145,7 @@ where
         // Header
         self.buf.resize(HEADER_SIZE, 0);
         self.stream.read_exact(&mut self.buf)?;
-        let len = usize::try_from(self.buf.get_u32()).expect("`u32` must fit into `usize`");
+        let len = usize::from(self.buf.get_u16());
         self.validate_payload_len(len)?;
         // Payload
         self.buf.resize(len, 0);
