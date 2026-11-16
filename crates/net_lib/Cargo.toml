@@ -13,7 +13,8 @@ tcp = []
 udp = []
 
 [dependencies]
-postcard.workspace = true
+bytes = "1.12.1"
+postcard = { workspace = true, features = ["use-std"] }
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
