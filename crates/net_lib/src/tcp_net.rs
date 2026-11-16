@@ -28,9 +28,8 @@ pub mod traits;
 /// Length field size.
 pub const HEADER_SIZE: usize = size_of::<u32>();
 /// Default max payload size.
-pub const DEFAULT_MAX_PAYLOAD_SIZE: u32 = (16 << 20) - HEADER_SIZE as u32; // 16 MiB
-pub const DEFAULT_MAX_PAYLOAD_SIZE_USIZE: usize = DEFAULT_MAX_PAYLOAD_SIZE as usize;
-const _: () = assert!(usize::BITS >= u32::BITS, "`u32` must fit into a `usize`");
+pub const MAX_PAYLOAD_SIZE: u16 = u16::MAX; // 64 KiB
+pub const MAX_PAYLOAD_SIZE_USIZE: usize = MAX_PAYLOAD_SIZE as usize;
 
 #[derive(Debug)]
 pub struct TcpNet<T> {
@@ -92,14 +91,14 @@ where
 
     #[must_use]
     fn new_buf() -> BytesMut {
-        BytesMut::with_capacity(DEFAULT_MAX_PAYLOAD_SIZE_USIZE)
+        BytesMut::with_capacity(MAX_PAYLOAD_SIZE_USIZE)
     }
 
     fn validate_payload_len(&self, len: usize) -> Result<(), FrameError> {
         if self.payload_len_in_range(len) {
             return Err(FrameError::PayloadTooLarge(PayloadTooLarge {
                 len: len,
-                max: DEFAULT_MAX_PAYLOAD_SIZE_USIZE,
+                max: MAX_PAYLOAD_SIZE_USIZE,
             }));
         }
 
@@ -108,7 +107,7 @@ where
 
     #[must_use]
     fn payload_len_in_range(&self, len: usize) -> bool {
-        len + HEADER_SIZE <= DEFAULT_MAX_PAYLOAD_SIZE_USIZE
+        len + HEADER_SIZE <= MAX_PAYLOAD_SIZE_USIZE
     }
 }
 
