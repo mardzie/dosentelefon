@@ -157,3 +157,61 @@ where
 socket_options!(TcpNet, stream, #[inline]);
 
 tcp_socket_options!(TcpNet, stream, #[inline]);
+
+#[cfg(test)]
+mod tcp_test {
+    use serde::{Deserialize, Serialize};
+
+    use crate::tcp_net::{
+        TcpListener, TcpNet,
+        traits::{TcpRead, TcpWrite},
+    };
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+    struct Message(pub String);
+
+    impl From<&str> for Message {
+        fn from(value: &str) -> Self {
+            Self(value.to_string())
+        }
+    }
+
+    impl From<String> for Message {
+        fn from(value: String) -> Self {
+            Self(value)
+        }
+    }
+
+    fn get_streams() -> (TcpNet<Message>, TcpNet<Message>) {
+        const LISTENER_ADDR: &str = "localhost:0";
+
+        let mut listener = TcpListener::<Message>::bind(LISTENER_ADDR).unwrap();
+        let stream1 = TcpNet::<Message>::connect(listener.local_addr().unwrap()).unwrap();
+        let (stream2, _) = listener.accept().unwrap();
+        (stream1, stream2)
+    }
+
+    #[test]
+    fn pass_message() {
+        let request = Message::from("Request");
+        let response = Message::from("Response");
+
+        let (mut send_stream, mut recv_stream) = get_streams();
+        send_stream.write(&request).unwrap();
+        assert_eq!(recv_stream.read().unwrap(), request);
+        recv_stream.write(&response).unwrap();
+        assert_eq!(send_stream.read().unwrap(), response);
+    }
+
+    #[test]
+    fn pass_raw_message() {
+        let request = postcard::to_stdvec(&Message::from("Request")).unwrap();
+        let response = postcard::to_stdvec(&Message::from("Response")).unwrap();
+
+        let (mut send_stream, mut recv_stream) = get_streams();
+        send_stream.write_bytes(&request).unwrap();
+        assert_eq!(recv_stream.read_bytes().unwrap(), request);
+        recv_stream.write_bytes(&response).unwrap();
+        assert_eq!(send_stream.read_bytes().unwrap(), response);
+    }
+}
