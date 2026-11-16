@@ -1,4 +1,6 @@
-use net_lib::udp_net::{UdpRead, UdpWrite, UdpNet};
+use std::num::NonZeroUsize;
+
+use net_lib::udp_net::{UdpNet, UdpRead, UdpWrite};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
@@ -66,6 +68,7 @@ fn get_two_sockets<P>(buf_size: usize) -> (UdpNet<P>, UdpNet<P>)
 where
     P: Serialize + DeserializeOwned,
 {
+    let buf_size = NonZeroUsize::new(buf_size).unwrap();
     let socket1 = UdpNet::bind("localhost:0", buf_size).unwrap();
     let addr1 = socket1.local_addr().unwrap();
     let socket2 = UdpNet::bind("localhost:0", buf_size).unwrap();

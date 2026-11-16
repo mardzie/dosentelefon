@@ -5,6 +5,7 @@
 use std::{
     io,
     net::{SocketAddr, ToSocketAddrs},
+    num::NonZeroUsize,
 };
 
 use crate::{
@@ -80,17 +81,12 @@ impl<P> UdpNet<P>
 where
     P: Serialize + DeserializeOwned,
 {
-    pub fn bind(addr: impl ToSocketAddrs, buf_size: usize) -> io::Result<Self> {
-        assert!(
-            buf_size > 0,
-            "`buf_size` must be greater than `0`! It needs at least one data bit and one \"truncation detection byte\""
-        );
-
+    pub fn bind(addr: impl ToSocketAddrs, buf_size: NonZeroUsize) -> io::Result<Self> {
         let (inner, _) = Inner::bind(addr)?;
 
         Ok(Self {
             inner,
-            buf: vec![0u8; buf_size + TRUNCATION_BYTE],
+            buf: vec![0u8; buf_size.get() + TRUNCATION_BYTE],
         })
     }
 
