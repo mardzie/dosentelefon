@@ -95,7 +95,7 @@ where
     }
 
     fn validate_payload_len(&self, len: usize) -> Result<(), FrameError> {
-        if self.payload_len_in_range(len) {
+        if !self.payload_len_in_range(len) {
             return Err(FrameError::PayloadTooLarge(PayloadTooLarge {
                 len: len,
                 max: MAX_PAYLOAD_SIZE_USIZE,
