@@ -2,7 +2,7 @@
 ///
 /// # Syntax:
 ///
-/// ```rust norun
+/// ```rust ignore
 /// socket_options!(name: ident, inner: ident);
 /// socket_options!(name: ident, inner: ident, #[inline]);
 /// socket_options!(name: ident, inner: ident, #[inline], #[must_use]); // `#[must_use]` doesn't make much sense here.
