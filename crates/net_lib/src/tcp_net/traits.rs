@@ -32,11 +32,11 @@ where
     where
         T: Serialize + DeserializeOwned,
     {
-        Ok(postcard::from_bytes(self.read_bytes()?)?)
+        Ok(postcard::from_bytes(&self.read_bytes()?)?)
     }
 
     /// Read a message.
-    fn read_bytes(&mut self) -> Result<&[u8], crate::tcp_net::error::FrameError>;
+    fn read_bytes(&mut self) -> Result<bytes::Bytes, crate::tcp_net::error::FrameError>;
 }
 
 pub trait TcpSocketOptions {

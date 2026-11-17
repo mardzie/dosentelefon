@@ -12,7 +12,7 @@ use std::{
 use crate::{
     macros::{socket_options, tcp_socket_options},
     tcp_net::{
-        error::{FrameError, PayloadTooLarge},
+        error::{FrameError, IsRetryable, PayloadTooLarge},
         traits::{TcpRead, TcpWrite},
     },
 };
@@ -35,8 +35,8 @@ pub const MAX_PAYLOAD_SIZE_USIZE: usize = MAX_PAYLOAD_SIZE as usize;
 #[derive(Debug)]
 pub struct TcpNet<T> {
     stream: TcpStream,
-    buf: BytesMut,
-
+    rbuf: BytesMut,
+    poisoned: bool,
     message_phantom: PhantomData<T>,
 }
 
@@ -49,7 +49,6 @@ where
         A: ToSocketAddrs,
     {
         let stream = TcpStream::connect(addr)?;
-
         Ok(Self::from_stream(stream))
     }
 
@@ -61,7 +60,8 @@ where
     pub fn from_stream(stream: TcpStream) -> Self {
         Self {
             stream,
-            buf: Self::new_buf(),
+            rbuf: Self::new_buf(),
+            poisoned: false,
 
             message_phantom: PhantomData,
         }
@@ -86,16 +86,76 @@ where
     where
         E: From<FrameError> + From<io::Error>,
     {
-        self.buf.clear();
-        self.buf.put_u16(0); // Placeholder, patched below
-        fill(&mut self.buf)?;
+        self.rbuf.clear();
+        self.rbuf.put_u16(0); // Placeholder, patched below
+        fill(&mut self.rbuf)?;
 
-        let payload_len = self.buf.len() - HEADER_SIZE;
+        let payload_len = self.rbuf.len() - HEADER_SIZE;
         self.validate_payload_len(payload_len)?;
-        self.buf[..HEADER_SIZE].copy_from_slice(&(payload_len as u16).to_be_bytes());
+        self.rbuf[..HEADER_SIZE].copy_from_slice(&(payload_len as u16).to_be_bytes());
 
-        self.stream.write_all(&self.buf)?;
-        Ok(self.buf.len())
+        self.stream.write_all(&self.rbuf)?;
+        Ok(self.rbuf.len())
+    }
+
+    fn read_frame(&mut self) -> Result<BytesMut, FrameError> {
+        if self.poisoned {
+            return Err(FrameError::Poisoned);
+        }
+
+        let res = self.read_frame_inner();
+        if matches!(&res, Err(e) if !e.is_retryable()) {
+            self.poisoned = true;
+        }
+        res
+    }
+
+    fn read_frame_inner(&mut self) -> Result<BytesMut, FrameError> {
+        loop {
+            if let Some(frame) = self.try_decode()? {
+                return Ok(frame);
+            }
+            if self.fill()? == 0 {
+                return Err(if self.rbuf.is_empty() {
+                    FrameError::Closed
+                } else {
+                    FrameError::UnexpectedEOF
+                });
+            }
+        }
+    }
+
+    /// Tries to decode `rbuf`.
+    ///
+    /// Operates only on `rbuf`.
+    ///
+    /// When `None` is returned it needs more bytes.
+    fn try_decode(&mut self) -> Result<Option<BytesMut>, FrameError> {
+        if self.rbuf.len() < HEADER_SIZE {
+            return Ok(None);
+        }
+        let len = usize::from(u16::from_be_bytes([self.rbuf[0], self.rbuf[1]]));
+        self.validate_payload_len(len)?;
+        let total = HEADER_SIZE + len;
+        if self.rbuf.len() < total {
+            self.rbuf.reserve(total - self.rbuf.len());
+            return Ok(None);
+        }
+        self.rbuf.advance(HEADER_SIZE);
+        Ok(Some(self.rbuf.split_to(len))) // O(1); shares the allocation
+    }
+
+    fn fill(&mut self) -> io::Result<usize> {
+        let mut tmp = [0u8; 4 * 1024];
+        loop {
+            match self.stream.read(&mut tmp) {
+                Ok(n) => {
+                    self.rbuf.extend_from_slice(&tmp[..n]);
+                }
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
+        }
     }
 
     #[must_use]
@@ -147,18 +207,8 @@ impl<M> TcpRead<M> for TcpNet<M>
 where
     M: Serialize + DeserializeOwned,
 {
-    fn read_bytes(&mut self) -> Result<&[u8], FrameError> {
-        self.buf.clear();
-        // Header
-        self.buf.resize(HEADER_SIZE, 0);
-        self.stream.read_exact(&mut self.buf)?;
-        let len = usize::from(self.buf.get_u16());
-        self.validate_payload_len(len)?;
-        // Payload
-        self.buf.resize(len, 0);
-        self.stream.read_exact(&mut self.buf)?;
-
-        Ok(&self.buf)
+    fn read_bytes(&mut self) -> Result<bytes::Bytes, FrameError> {
+        Ok(self.read_frame()?.freeze())
     }
 }
 
