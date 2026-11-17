@@ -116,9 +116,12 @@ impl<M> TcpWrite<M> for TcpNet<M>
 where
     M: Serialize + DeserializeOwned,
 {
-    fn write(&mut self, message: &M) -> Result<(), PostcardFrameError> {
+    fn write_custom<T>(&mut self, msg: &T) -> Result<(), crate::tcp_net::error::PostcardFrameError>
+    where
+        T: Serialize + DeserializeOwned,
+    {
         self.write_frame(|buf| {
-            postcard::to_io(message, buf.writer())?;
+            postcard::to_io(msg, buf.writer())?;
             Ok(())
         })
         .map(drop)
@@ -136,10 +139,6 @@ impl<M> TcpRead<M> for TcpNet<M>
 where
     M: Serialize + DeserializeOwned,
 {
-    fn read(&mut self) -> Result<M, PostcardFrameError> {
-        Ok(postcard::from_bytes::<M>(self.read_bytes()?)?)
-    }
-
     fn read_bytes(&mut self) -> Result<&[u8], FrameError> {
         self.buf.clear();
         // Header
