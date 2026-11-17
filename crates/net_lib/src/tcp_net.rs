@@ -67,8 +67,16 @@ where
         }
     }
 
-    pub fn try_clone(&self) -> io::Result<Self> {
-        Ok(Self::from_stream(self.stream.try_clone()?))
+    /// Try to clone the underlying stream.
+    ///
+    /// `R` allows one side to have another message type than the other.
+    /// This allows for one side to be a writer and write a request type
+    /// while the other is a reader and reads a response type.
+    pub fn try_clone<R>(&self) -> io::Result<TcpNet<R>>
+    where
+        R: Serialize + DeserializeOwned,
+    {
+        Ok(TcpNet::<R>::from_stream(self.stream.try_clone()?))
     }
 
     fn write_frame<E>(
