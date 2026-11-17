@@ -12,7 +12,7 @@ use std::{
 use crate::{
     macros::{socket_options, tcp_socket_options},
     tcp_net::{
-        error::{FrameError, PayloadTooLarge, PostcardFrameError},
+        error::{FrameError, PayloadTooLarge},
         traits::{TcpRead, TcpWrite},
     },
 };
