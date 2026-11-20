@@ -142,15 +142,26 @@ where
         }
     }
 
-    fn write_frame<E>(&mut self, fill: impl FnOnce(BytesMut) -> Result<(), E>) -> Result<usize, E>
+    fn write_frame<E>(
+        &mut self,
+        fill: impl FnOnce(&mut BytesMut) -> Result<(), E>,
+    ) -> Result<usize, E>
     where
         E: From<FrameError> + From<io::Error>,
     {
         self.wbuf.clear();
+
+        // HEADER
         self.wbuf.put_u16(0);
-        fill(self.wbuf.split_off(HEADER_SIZE))?;
-        let payload_len = self.wbuf.len() - HEADER_SIZE;
+
+        // Payload
+        let mut payload_split = self.wbuf.split_off(HEADER_SIZE);
+        fill(&mut payload_split)?;
+        let payload_len = payload_split.len();
+        self.wbuf.unsplit(payload_split);
         self.validate_payload_len(payload_len)?;
+
+        // Update HEADER
         self.wbuf[..HEADER_SIZE].copy_from_slice(&(payload_len as u16).to_be_bytes());
 
         self.stream.write_all(&self.wbuf)?;
@@ -199,7 +210,8 @@ where
     }
 
     fn write_bytes(&mut self, payload: &[u8]) -> Result<usize, FrameError> {
-        self.write_frame(|mut buf| {
+        self.write_frame(|buf| {
+            buf.reserve(payload.len().saturating_sub(buf.capacity()));
             buf.put_slice(payload);
             Ok(())
         })
