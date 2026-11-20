@@ -36,6 +36,7 @@ pub const MAX_PAYLOAD_SIZE_USIZE: usize = MAX_PAYLOAD_SIZE as usize;
 pub struct TcpNet<T> {
     stream: TcpStream,
     rbuf: BytesMut,
+    wbuf: BytesMut,
     poisoned: bool,
     message_phantom: PhantomData<T>,
 }
@@ -60,7 +61,8 @@ where
     pub fn from_stream(stream: TcpStream) -> Self {
         Self {
             stream,
-            rbuf: Self::new_buf(),
+            rbuf: BytesMut::new(),
+            wbuf: BytesMut::new(),
             poisoned: false,
 
             message_phantom: PhantomData,
@@ -79,23 +81,19 @@ where
         Ok(TcpNet::<R>::from_stream(self.stream.try_clone()?))
     }
 
-    fn write_frame<E>(
-        &mut self,
-        fill: impl FnOnce(&mut BytesMut) -> Result<(), E>,
-    ) -> Result<usize, E>
+    fn write_frame<E>(&mut self, fill: impl FnOnce(BytesMut) -> Result<(), E>) -> Result<usize, E>
     where
         E: From<FrameError> + From<io::Error>,
     {
-        self.rbuf.clear();
-        self.rbuf.put_u16(0); // Placeholder, patched below
-        fill(&mut self.rbuf)?;
-
-        let payload_len = self.rbuf.len() - HEADER_SIZE;
+        self.wbuf.clear();
+        self.wbuf.put_u16(0);
+        fill(self.wbuf.split_off(HEADER_SIZE))?;
+        let payload_len = self.wbuf.len() - HEADER_SIZE;
         self.validate_payload_len(payload_len)?;
-        self.rbuf[..HEADER_SIZE].copy_from_slice(&(payload_len as u16).to_be_bytes());
+        self.wbuf[..HEADER_SIZE].copy_from_slice(&(payload_len as u16).to_be_bytes());
 
-        self.stream.write_all(&self.rbuf)?;
-        Ok(self.rbuf.len())
+        self.stream.write_all(&self.wbuf)?;
+        Ok(self.wbuf.len())
     }
 
     fn read_frame(&mut self) -> Result<BytesMut, FrameError> {
@@ -151,16 +149,12 @@ where
             match self.stream.read(&mut tmp) {
                 Ok(n) => {
                     self.rbuf.extend_from_slice(&tmp[..n]);
+                    return Ok(n);
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e),
             }
         }
-    }
-
-    #[must_use]
-    fn new_buf() -> BytesMut {
-        BytesMut::with_capacity(MAX_PAYLOAD_SIZE_USIZE)
     }
 
     fn validate_payload_len(&self, len: usize) -> Result<(), FrameError> {
@@ -196,8 +190,8 @@ where
     }
 
     fn write_bytes(&mut self, payload: &[u8]) -> Result<usize, FrameError> {
-        self.write_frame(|buf| {
-            buf.put_slice(&payload);
+        self.write_frame(|mut buf| {
+            buf.put_slice(payload);
             Ok(())
         })
     }
@@ -222,7 +216,7 @@ mod tcp_test {
 
     use crate::tcp_net::{
         TcpListener, TcpNet,
-        traits::{TcpRead, TcpWrite},
+        traits::{TcpRead, TcpSocketOptions, TcpWrite},
     };
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
@@ -256,8 +250,10 @@ mod tcp_test {
 
         let (mut send_stream, mut recv_stream) = get_streams();
         send_stream.write(&request).unwrap();
+        send_stream.flush().unwrap();
         assert_eq!(recv_stream.read().unwrap(), request);
         recv_stream.write(&response).unwrap();
+        recv_stream.flush().unwrap();
         assert_eq!(send_stream.read().unwrap(), response);
     }
 
