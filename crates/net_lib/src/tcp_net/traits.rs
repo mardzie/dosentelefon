@@ -2,23 +2,6 @@ use std::{io, time::Duration};
 
 use serde::{Serialize, de::DeserializeOwned};
 
-pub trait TcpWrite<M>
-where
-    M: Serialize + DeserializeOwned,
-{
-    /// Serialize `M` and write it as a message.
-    fn write(&mut self, msg: &M) -> Result<(), crate::tcp_net::error::PostcardFrameError> {
-        self.write_custom(msg)
-    }
-
-    fn write_custom<T>(&mut self, msg: &T) -> Result<(), crate::tcp_net::error::PostcardFrameError>
-    where
-        T: Serialize + DeserializeOwned;
-
-    /// Write a new message.
-    fn write_bytes(&mut self, payload: &[u8]) -> Result<usize, crate::tcp_net::error::FrameError>;
-}
-
 pub trait TcpRead<M>
 where
     M: Serialize + DeserializeOwned,
@@ -37,6 +20,23 @@ where
 
     /// Read a message.
     fn read_bytes(&mut self) -> Result<bytes::Bytes, crate::tcp_net::error::FrameError>;
+}
+
+pub trait TcpWrite<M>
+where
+    M: Serialize + DeserializeOwned,
+{
+    /// Serialize `M` and write it as a message.
+    fn write(&mut self, msg: &M) -> Result<(), crate::tcp_net::error::PostcardFrameError> {
+        self.write_custom(msg)
+    }
+
+    fn write_custom<T>(&mut self, msg: &T) -> Result<(), crate::tcp_net::error::PostcardFrameError>
+    where
+        T: Serialize + DeserializeOwned;
+
+    /// Write a new message.
+    fn write_bytes(&mut self, payload: &[u8]) -> Result<usize, crate::tcp_net::error::FrameError>;
 }
 
 pub trait TcpSocketOptions {

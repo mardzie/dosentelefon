@@ -81,21 +81,6 @@ where
         Ok(TcpNet::<R>::from_stream(self.stream.try_clone()?))
     }
 
-    fn write_frame<E>(&mut self, fill: impl FnOnce(BytesMut) -> Result<(), E>) -> Result<usize, E>
-    where
-        E: From<FrameError> + From<io::Error>,
-    {
-        self.wbuf.clear();
-        self.wbuf.put_u16(0);
-        fill(self.wbuf.split_off(HEADER_SIZE))?;
-        let payload_len = self.wbuf.len() - HEADER_SIZE;
-        self.validate_payload_len(payload_len)?;
-        self.wbuf[..HEADER_SIZE].copy_from_slice(&(payload_len as u16).to_be_bytes());
-
-        self.stream.write_all(&self.wbuf)?;
-        Ok(self.wbuf.len())
-    }
-
     fn read_frame(&mut self) -> Result<BytesMut, FrameError> {
         if self.poisoned {
             return Err(FrameError::Poisoned);
@@ -157,6 +142,21 @@ where
         }
     }
 
+    fn write_frame<E>(&mut self, fill: impl FnOnce(BytesMut) -> Result<(), E>) -> Result<usize, E>
+    where
+        E: From<FrameError> + From<io::Error>,
+    {
+        self.wbuf.clear();
+        self.wbuf.put_u16(0);
+        fill(self.wbuf.split_off(HEADER_SIZE))?;
+        let payload_len = self.wbuf.len() - HEADER_SIZE;
+        self.validate_payload_len(payload_len)?;
+        self.wbuf[..HEADER_SIZE].copy_from_slice(&(payload_len as u16).to_be_bytes());
+
+        self.stream.write_all(&self.wbuf)?;
+        Ok(self.wbuf.len())
+    }
+
     fn validate_payload_len(&self, len: usize) -> Result<(), FrameError> {
         if !self.payload_len_in_range(len) {
             return Err(FrameError::PayloadTooLarge(PayloadTooLarge {
@@ -171,6 +171,15 @@ where
     #[must_use]
     fn payload_len_in_range(&self, len: usize) -> bool {
         len + HEADER_SIZE <= MAX_PAYLOAD_SIZE_USIZE
+    }
+}
+
+impl<M> TcpRead<M> for TcpNet<M>
+where
+    M: Serialize + DeserializeOwned,
+{
+    fn read_bytes(&mut self) -> Result<bytes::Bytes, FrameError> {
+        Ok(self.read_frame()?.freeze())
     }
 }
 
@@ -194,15 +203,6 @@ where
             buf.put_slice(payload);
             Ok(())
         })
-    }
-}
-
-impl<M> TcpRead<M> for TcpNet<M>
-where
-    M: Serialize + DeserializeOwned,
-{
-    fn read_bytes(&mut self) -> Result<bytes::Bytes, FrameError> {
-        Ok(self.read_frame()?.freeze())
     }
 }
 
