@@ -33,21 +33,25 @@ pub const HEADER_SIZE: usize = size_of::<Header>();
 pub const MAX_PAYLOAD_SIZE: Header = Header::MAX; // 64 KiB
 pub const MAX_PAYLOAD_SIZE_USIZE: usize = MAX_PAYLOAD_SIZE as usize;
 
+/// A TCP stream.
+///
+/// `R`: is the type read will try to deserialize the messages to.
+/// `W`: is the type write will try to serialize the messages from.
 #[derive(Debug)]
-pub struct TcpNet<R, S> {
+pub struct TcpNet<R, W> {
     stream: TcpStream,
     rbuf: BytesMut,
     wbuf: BytesMut,
     poisoned: bool,
 
     request_phantom: PhantomData<R>,
-    response_phantom: PhantomData<S>,
+    response_phantom: PhantomData<W>,
 }
 
-impl<R, S> TcpNet<R, S>
+impl<R, W> TcpNet<R, W>
 where
     R: Serialize + DeserializeOwned,
-    S: Serialize + DeserializeOwned,
+    W: Serialize + DeserializeOwned,
 {
     pub fn connect<A>(addr: A) -> io::Result<Self>
     where
@@ -75,8 +79,8 @@ where
     }
 
     /// Try to clone the underlying stream.
-    pub fn try_clone(&self) -> io::Result<TcpNet<R, S>> {
-        Ok(TcpNet::<R, S>::from_stream(self.stream.try_clone()?))
+    pub fn try_clone(&self) -> io::Result<TcpNet<R, W>> {
+        Ok(TcpNet::<R, W>::from_stream(self.stream.try_clone()?))
     }
 
     fn read_frame(&mut self) -> Result<BytesMut, FrameError> {
@@ -183,20 +187,20 @@ where
     }
 }
 
-impl<R, S> TcpRead<S> for TcpNet<R, S>
+impl<R, W> TcpRead<R> for TcpNet<R, W>
 where
     R: Serialize + DeserializeOwned,
-    S: Serialize + DeserializeOwned,
+    W: Serialize + DeserializeOwned,
 {
     fn read_bytes(&mut self) -> Result<bytes::Bytes, FrameError> {
         Ok(self.read_frame()?.freeze())
     }
 }
 
-impl<R, S> TcpWrite<R> for TcpNet<R, S>
+impl<R, W> TcpWrite<W> for TcpNet<R, W>
 where
     R: Serialize + DeserializeOwned,
-    S: Serialize + DeserializeOwned,
+    W: Serialize + DeserializeOwned,
 {
     fn write_custom<T>(&mut self, msg: &T) -> Result<(), crate::tcp_net::error::PostcardFrameError>
     where
@@ -218,10 +222,10 @@ where
     }
 }
 
-impl<R, S> SocketOptions for TcpNet<R, S>
+impl<R, W> SocketOptions for TcpNet<R, W>
 where
     R: Serialize + DeserializeOwned,
-    S: Serialize + DeserializeOwned,
+    W: Serialize + DeserializeOwned,
 {
     #[inline]
     fn read_timeout(&self) -> io::Result<Option<std::time::Duration>> {

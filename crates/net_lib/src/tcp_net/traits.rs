@@ -2,12 +2,12 @@ use std::{io, time::Duration};
 
 use serde::{Serialize, de::DeserializeOwned};
 
-pub trait TcpRead<S>
+pub trait TcpRead<R>
 where
-    S: Serialize + DeserializeOwned,
+    R: Serialize + DeserializeOwned,
 {
     /// Read a message and deserializs it into `M`.
-    fn read(&mut self) -> Result<S, crate::tcp_net::error::PostcardFrameError> {
+    fn read(&mut self) -> Result<R, crate::tcp_net::error::PostcardFrameError> {
         self.read_custom()
     }
 
@@ -22,12 +22,12 @@ where
     fn read_bytes(&mut self) -> Result<bytes::Bytes, crate::tcp_net::error::FrameError>;
 }
 
-pub trait TcpWrite<R>
+pub trait TcpWrite<W>
 where
-    R: Serialize + DeserializeOwned,
+    W: Serialize + DeserializeOwned,
 {
     /// Serialize `M` and write it as a message.
-    fn write(&mut self, msg: &R) -> Result<(), crate::tcp_net::error::PostcardFrameError> {
+    fn write(&mut self, msg: &W) -> Result<(), crate::tcp_net::error::PostcardFrameError> {
         self.write_custom(msg)
     }
 
