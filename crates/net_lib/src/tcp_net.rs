@@ -223,30 +223,37 @@ where
     R: Serialize + DeserializeOwned,
     S: Serialize + DeserializeOwned,
 {
+    #[inline]
     fn read_timeout(&self) -> io::Result<Option<std::time::Duration>> {
         self.stream.read_timeout()
     }
 
+    #[inline]
     fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
         self.stream.set_read_timeout(dur)
     }
 
+    #[inline]
     fn write_timeout(&self) -> io::Result<Option<Duration>> {
         self.stream.write_timeout()
     }
 
+    #[inline]
     fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
         self.stream.set_write_timeout(dur)
     }
 
+    #[inline]
     fn ttl(&self) -> io::Result<u32> {
         self.stream.ttl()
     }
 
+    #[inline]
     fn set_ttl(&self, ttl: u32) -> io::Result<()> {
         self.stream.set_ttl(ttl)
     }
 
+    #[inline]
     fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
         self.stream.set_nonblocking(nonblocking)
     }
