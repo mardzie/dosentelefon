@@ -60,9 +60,10 @@ pub(crate) use socket_options;
 
 macro_rules! tcp_socket_options {
     ($name:ident, $inner:ident $(, #[$attr:meta])*) => {
-        impl<P> $crate::tcp_net::traits::TcpSocketOptions for $name<P>
+        impl<R, S> $crate::tcp_net::traits::TcpSocketOptions for $name<R, S>
         where
-            P: ::serde::Serialize + ::serde::de::DeserializeOwned,
+            R: ::serde::Serialize + ::serde::de::DeserializeOwned,
+            S: ::serde::Serialize + ::serde::de::DeserializeOwned,
         {
             $(#[$attr])*
             fn nodelay(&self) -> io::Result<bool> {
