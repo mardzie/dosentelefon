@@ -5,12 +5,10 @@ edition = "2024"
 
 [dependencies]
 chrono.workspace = true
-crc32fast = "1.5.5"
 crossbeam.workspace = true
 ringbuf.workspace = true
 serde.workspace = true
 thiserror.workspace = true
-toml = "1.2.1+spec-1.1.0"
 tracing.workspace = true
 
 [dev-dependencies]
@@ -23,22 +21,29 @@ workspace = true
 members = ["crates/*"]
 
 [workspace.dependencies]
+audio_codec.path = "crates/audio_codec"
 audio_common.path = "crates/audio_common"
+audio_jitter_buffer.path = "crates/audio_jitter_buffer"
+audio_resampler.path = "crates/audio_resampler"
 audio_stream.path = "crates/audio_stream"
 chrono = { version = "0.4.45", features = ["serde"] }
 common.path = "crates/common"
+crc32fast = "1.5.5"
 crossbeam = "0.8.5"
 dasp = { version = "0.11.0", features = ["all"] }
 fearless_simd = "1.2.0"
 fs-err = "3.3.2"
 itertools = "0.15.0"
+net_lib.path = "crates/net_lib"
 num = "0.4.3"
 opus = "0.4.0"
 postcard = "1.1.3"
+protocol.path = "crates/protocol"
 rayon = "1.12.0"
 ringbuf = "0.6.0"
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
+toml = "1.2.1+spec-1.1.0"
 tracing = { version = "0.1.44", features = ["release_max_level_warn"] }
 
 [workspace.lints.clippy]

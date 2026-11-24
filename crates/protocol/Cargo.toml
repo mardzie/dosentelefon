@@ -1,0 +1,22 @@
+[package]
+name = "protocol"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+audio_common.workspace = true
+chrono.workspace = true
+common.workspace = true
+crc32fast.workspace = true
+itertools.workspace = true
+net_lib.workspace = true
+num.workspace = true
+postcard.workspace = true
+rayon.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
