@@ -10,11 +10,12 @@ use std::{
 };
 
 use crate::{
-    macros::{socket_options, tcp_socket_options},
+    macros::tcp_socket_options,
     tcp_net::{
         error::{FrameError, IsRetryable, PayloadTooLarge},
         traits::{TcpRead, TcpWrite},
     },
+    traits::SocketOptions,
 };
 
 use bytes::{Buf, BufMut, BytesMut};
@@ -33,17 +34,20 @@ pub const MAX_PAYLOAD_SIZE: Header = Header::MAX; // 64 KiB
 pub const MAX_PAYLOAD_SIZE_USIZE: usize = MAX_PAYLOAD_SIZE as usize;
 
 #[derive(Debug)]
-pub struct TcpNet<T> {
+pub struct TcpNet<R, S> {
     stream: TcpStream,
     rbuf: BytesMut,
     wbuf: BytesMut,
     poisoned: bool,
-    message_phantom: PhantomData<T>,
+
+    request_phantom: PhantomData<R>,
+    response_phantom: PhantomData<S>,
 }
 
-impl<T> TcpNet<T>
+impl<R, S> TcpNet<R, S>
 where
-    T: Serialize + DeserializeOwned,
+    R: Serialize + DeserializeOwned,
+    S: Serialize + DeserializeOwned,
 {
     pub fn connect<A>(addr: A) -> io::Result<Self>
     where
@@ -65,20 +69,14 @@ where
             wbuf: BytesMut::new(),
             poisoned: false,
 
-            message_phantom: PhantomData,
+            request_phantom: PhantomData,
+            response_phantom: PhantomData,
         }
     }
 
     /// Try to clone the underlying stream.
-    ///
-    /// `R` allows one side to have another message type than the other.
-    /// This allows for one side to be a writer and write a request type
-    /// while the other is a reader and reads a response type.
-    pub fn try_clone<R>(&self) -> io::Result<TcpNet<R>>
-    where
-        R: Serialize + DeserializeOwned,
-    {
-        Ok(TcpNet::<R>::from_stream(self.stream.try_clone()?))
+    pub fn try_clone(&self) -> io::Result<TcpNet<R, S>> {
+        Ok(TcpNet::<R, S>::from_stream(self.stream.try_clone()?))
     }
 
     fn read_frame(&mut self) -> Result<BytesMut, FrameError> {
@@ -185,18 +183,20 @@ where
     }
 }
 
-impl<M> TcpRead<M> for TcpNet<M>
+impl<R, S> TcpRead<S> for TcpNet<R, S>
 where
-    M: Serialize + DeserializeOwned,
+    R: Serialize + DeserializeOwned,
+    S: Serialize + DeserializeOwned,
 {
     fn read_bytes(&mut self) -> Result<bytes::Bytes, FrameError> {
         Ok(self.read_frame()?.freeze())
     }
 }
 
-impl<M> TcpWrite<M> for TcpNet<M>
+impl<R, S> TcpWrite<R> for TcpNet<R, S>
 where
-    M: Serialize + DeserializeOwned,
+    R: Serialize + DeserializeOwned,
+    S: Serialize + DeserializeOwned,
 {
     fn write_custom<T>(&mut self, msg: &T) -> Result<(), crate::tcp_net::error::PostcardFrameError>
     where
@@ -218,7 +218,39 @@ where
     }
 }
 
-socket_options!(TcpNet, stream, #[inline]);
+impl<R, S> SocketOptions for TcpNet<R, S>
+where
+    R: Serialize + DeserializeOwned,
+    S: Serialize + DeserializeOwned,
+{
+    fn read_timeout(&self) -> io::Result<Option<std::time::Duration>> {
+        self.stream.read_timeout()
+    }
+
+    fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        self.stream.set_read_timeout(dur)
+    }
+
+    fn write_timeout(&self) -> io::Result<Option<Duration>> {
+        self.stream.write_timeout()
+    }
+
+    fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        self.stream.set_write_timeout(dur)
+    }
+
+    fn ttl(&self) -> io::Result<u32> {
+        self.stream.ttl()
+    }
+
+    fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+        self.stream.set_ttl(ttl)
+    }
+
+    fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+        self.stream.set_nonblocking(nonblocking)
+    }
+}
 
 tcp_socket_options!(TcpNet, stream, #[inline]);
 
@@ -246,11 +278,11 @@ mod tcp_test {
         }
     }
 
-    fn get_streams() -> (TcpNet<Message>, TcpNet<Message>) {
+    fn get_streams() -> (TcpNet<Message, Message>, TcpNet<Message, Message>) {
         const LISTENER_ADDR: &str = "localhost:0";
 
-        let mut listener = TcpListener::<Message>::bind(LISTENER_ADDR).unwrap();
-        let stream1 = TcpNet::<Message>::connect(listener.local_addr().unwrap()).unwrap();
+        let mut listener = TcpListener::<Message, Message>::bind(LISTENER_ADDR).unwrap();
+        let stream1 = TcpNet::<Message, Message>::connect(listener.local_addr().unwrap()).unwrap();
         let (stream2, _) = listener.accept().unwrap();
         (stream1, stream2)
     }

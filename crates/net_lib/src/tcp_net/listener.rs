@@ -9,15 +9,17 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::tcp_net::TcpNet;
 
 #[derive(Debug)]
-pub struct TcpListener<M> {
+pub struct TcpListener<R, S> {
     listener: std::net::TcpListener,
 
-    message_phantom: PhantomData<M>,
+    request_phantom: PhantomData<R>,
+    response_phantom: PhantomData<S>,
 }
 
-impl<M> TcpListener<M>
+impl<R, S> TcpListener<R, S>
 where
-    M: Serialize + DeserializeOwned,
+    R: Serialize + DeserializeOwned,
+    S: Serialize + DeserializeOwned,
 {
     pub fn bind<A>(addr: A) -> io::Result<Self>
     where
@@ -26,16 +28,17 @@ where
         Ok(Self {
             listener: std::net::TcpListener::bind(addr)?,
 
-            message_phantom: PhantomData,
+            request_phantom: PhantomData,
+            response_phantom: PhantomData,
         })
     }
 
-    pub fn accept(&mut self) -> io::Result<(TcpNet<M>, SocketAddr)> {
+    pub fn accept(&mut self) -> io::Result<(TcpNet<R, S>, SocketAddr)> {
         let (tcp_stream, addr) = self.listener.accept()?;
         Ok((TcpNet::from_stream(tcp_stream), addr))
     }
 
-    pub fn incoming(&self) -> impl Iterator<Item = Result<TcpNet<M>, io::Error>> {
+    pub fn incoming(&self) -> impl Iterator<Item = Result<TcpNet<R, S>, io::Error>> {
         self.listener
             .incoming()
             .map(|res| res.map(|stream| TcpNet::from_stream(stream)))
