@@ -83,6 +83,16 @@ where
         Ok(TcpNet::<R, W>::from_stream(self.stream.try_clone()?))
     }
 
+    #[inline]
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.stream.local_addr()
+    }
+
+    #[inline]
+    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
+        self.stream.peer_addr()
+    }
+
     fn read_frame(&mut self) -> Result<BytesMut, FrameError> {
         if self.poisoned {
             return Err(FrameError::Poisoned);
