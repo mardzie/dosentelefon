@@ -12,6 +12,7 @@ fearless_simd.workspace = true
 itertools.workspace = true
 net_lib.workspace = true
 num.workspace = true
+parking_lot.workspace = true
 postcard.workspace = true
 protocol.workspace = true
 rayon.workspace = true
