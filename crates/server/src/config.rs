@@ -20,7 +20,7 @@ impl Config {
             Ok(config) => Ok(config),
             Err(ConfigError::Io(_)) => {
                 let config = Self::default();
-                config.write(&path);
+                config.write(&path)?;
                 Ok(config)
             }
             Err(e) => Err(e),
