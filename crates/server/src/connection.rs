@@ -16,16 +16,23 @@ use net_lib::tcp_net::{
 use protocol::{request::Request, response::Response};
 use tracing::{debug, error, info, warn};
 
+use crate::Peers;
+
 #[derive(Debug)]
 pub struct Connection {
     stream: TcpNet<Request, Response>,
+    peers: Peers,
     commands: Receiver<Commands>,
     command_sender: Sender<Commands>,
     stop_signal: Arc<AtomicBool>,
 }
 
 impl Connection {
-    pub fn new(stream: TcpNet<Request, Response>, channel_cap: usize) -> ConnectionHandle<()> {
+    pub fn new(
+        stream: TcpNet<Request, Response>,
+        channel_cap: usize,
+        peers: Peers,
+    ) -> (ConnectionHandle<()>, Sender<Commands>) {
         let (command_sender, commands) = crossbeam::channel::bounded(channel_cap);
         let stop_sender = command_sender.clone();
         let stop = move || {
@@ -33,13 +40,14 @@ impl Connection {
         };
         let connection = Self {
             stream,
+            peers,
             commands,
             command_sender: command_sender.clone(),
             stop_signal: Arc::new(AtomicBool::new(false)),
         };
 
         let handle = std::thread::spawn(move || connection.handle());
-        ConnectionHandle::new(command_sender, stop, handle)
+        (ConnectionHandle::new(stop, handle), command_sender)
     }
 
     fn handle(mut self) {
@@ -75,7 +83,8 @@ impl Connection {
             };
 
             match command {
-                Commands::Received(request) => request,
+                Commands::Send(response) => self.handle_sends(response),
+                Commands::Received(request) => self.handle_recvs(request),
                 Commands::Stop => {
                     self.stop_signal.store(true, Ordering::Release);
                     continue 'main_loop;
@@ -91,6 +100,10 @@ impl Connection {
         }
         let _ = handle.join();
     }
+
+    fn handle_sends(&mut self, response: Response) {}
+
+    fn handle_recvs(&mut self, request: Request) {}
 
     fn stream_reader(
         mut stream: TcpNet<Request, Response>,
@@ -118,26 +131,20 @@ impl Connection {
 }
 
 pub struct ConnectionHandle<T> {
-    command_sender: Sender<Commands>,
-    stop: Box<dyn FnOnce()>,
+    stop: Box<dyn FnOnce() + Send + Sync>,
     handle: JoinHandle<T>,
 }
 
 impl<T> ConnectionHandle<T> {
     #[must_use]
-    pub fn new<F>(command_sender: Sender<Commands>, stop: F, handle: JoinHandle<T>) -> Self
+    pub fn new<F>(stop: F, handle: JoinHandle<T>) -> Self
     where
-        F: FnOnce() + 'static,
+        F: FnOnce() + Send + Sync + 'static,
     {
         Self {
-            command_sender,
             stop: Box::new(stop),
             handle,
         }
-    }
-
-    pub fn send(&self, response: Response) -> Result<(), crossbeam::channel::SendError<Commands>> {
-        self.command_sender.send(Commands::Send(response))
     }
 
     pub fn stop(self) -> std::thread::Result<T> {

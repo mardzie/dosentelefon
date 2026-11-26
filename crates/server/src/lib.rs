@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use crossbeam::channel::Sender;
 use parking_lot::RwLock;
 
 mod connection;
@@ -19,14 +20,18 @@ use net_lib::tcp_net::TcpListener;
 use protocol::{request::Request, response::Response};
 use tracing::{debug, info, warn};
 
-use crate::connection::{Connection, ConnectionHandle};
+use crate::connection::{Commands, Connection, ConnectionHandle};
 
 pub const SLEEP_DUR: Duration = Duration::from_millis(10);
 const CHANNEL_CAPACITY: usize = 8;
 
+pub type Handles = Arc<RwLock<HashMap<SocketAddr, ConnectionHandle<()>>>>;
+pub type Peers = Arc<RwLock<HashMap<SocketAddr, Sender<Commands>>>>;
+
 #[derive(Debug)]
 pub struct Server {
-    handles: Arc<RwLock<HashMap<SocketAddr, ConnectionHandle<()>>>>,
+    handles: Handles,
+    peers: Peers,
     listener: TcpListener<Request, Response>,
     stop_signal: AtomicBool,
 }
@@ -41,6 +46,7 @@ impl Server {
 
         Ok(Self {
             handles: Arc::new(RwLock::new(HashMap::new())),
+            peers: Arc::new(RwLock::new(HashMap::new())),
             listener,
             stop_signal: AtomicBool::new(false),
         })
@@ -63,10 +69,10 @@ impl Server {
                 },
             };
 
-            // TODO: Give the Connections access to all handles.
-            todo!();
-            let handle = Connection::new(stream, CHANNEL_CAPACITY);
+            let (handle, command_sender) =
+                Connection::new(stream, CHANNEL_CAPACITY, self.peers.clone());
             self.handles.write().insert(addr, handle);
+            self.peers.write().insert(addr, command_sender);
         };
 
         info!("Stopping Server");
